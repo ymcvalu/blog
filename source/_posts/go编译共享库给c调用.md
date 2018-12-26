@@ -28,7 +28,9 @@ import "C" // 需要导入`C`才可以生成`.h`文件
 
 // 使用`export`导出函数
 //export ServerRun
-func ServerRun(addr string) int {
+func ServerRun(_addr *C.char) int {
+    // 转换c字符串为golang字符串
+    addr :=C.GoString(_addr)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(resp http.ResponseWriter, req *http.Request) {
 		resp.Write([]byte{'H', 'i', '!'})
@@ -51,9 +53,20 @@ func main() {}
 
 注意点：
 
-- 需要引入`C`包
+- 需要引入`C`包，可以使用`C`包中的`GoString`将`c`的字符串转换为`go`的字符串
+
 - 需要导出的函数，需要使用`//export funcName`标识
+
 - 包内函数也可以导出
+
+- `go`和`c`两者的字符串内存布局不同，如果`go`函数参数声明为`go`的字符串类型，在`c`中相当于一个结构体：
+
+  ```c
+  typedef struct { const char *p; ptrdiff_t n; } _GoString_;
+  typedef _GoString_ GoString;
+  ```
+
+  当要在`c`中调用`go`函数时，需要手动构造字符串，而且还有内存安全的问题。
 
 ##### compile
 
@@ -88,35 +101,20 @@ typedef _GoString_ GoString;
 typedef long long GoInt64;
 typedef GoInt64 GoInt;
 
-extern GoInt ServerRun(GoString p0);
+extern GoInt ServerRun(char* p0);
 
 extern void wait();
 ```
 
-`go`中的`string`类型是一个结构体：
-
-```go
-type string struct {
-    data []byte
-    len int
-}
-```
-
-而`c`中的`string`实际上是`byte[]`，两者的内存布局本身就不一样，因此在`c`中调用`go`的代码时，需要先按照`go`的类型结构构造参数。
+可以看到，`.h`文件中包含了外部函数`ServerRun`和`wait`的声明
 
 ```c
 #include<stdio.h>
 #include "test.h"
 
 int main(void){
-    // 构造字符串类型
-    char str[5] = {':','8','0','8','0'};
-    GoString addr = {
-        p: str,
-        n: 5
-    };
 	// 执行 ServerRun
-    if (ServerRun(addr) != 0){
+    if (ServerRun(":8080") != 0){
         printf("failed to start server!");
         return -1;
     }
@@ -147,11 +145,12 @@ int main(void){
 - 动态共享库
 
   ```sh
-  $ gcc main.c -ltest -L. -o test
+  $ gcc main.c -ltest -L. -I. -o test
   ```
 
   - `-l`：声明使用到的动态共享库，比如`libtest.so`，则这里传入`test`
   - `-L`：在指定路径中查找共享库；也可以将`.so`文件拷贝到默认共享库目录下
+  - `-I`：在指定路径中查找`.h`头部文件
 
 
 
