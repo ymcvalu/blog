@@ -197,6 +197,14 @@ proc.go:
 
 ```
 ```go
+// go程序编译时，会在main包生成init函数，该函数内调用所有依赖的包的init函数，如果同一个包被程序重复引入多次，他的init函数只会执行一次
+// 当编译时，链接器会将main.init链接到main_init
+//go:linkname main_init main.init
+func main_init()
+// 编译时，链接器会将用户的main.main函数链接到main_main
+//go:linkname main_main main.main
+func main_main()
+
 // The main goroutine.
 func main() {
 	g := getg()	//当前获取的g是刚刚在rt0_go内创建的goroutine
@@ -259,6 +267,7 @@ func main() {
 	main_init_done = make(chan bool)
 
   	//执行用户包（包括标准库）的初始化函数 init，程序所有的包的init函数都会在这个函数内被全部执行
+    // 因为main_init是在编译时进行链接的，因此这里使用间接调用
 	fn := main_init // make an indirect call, as the linker doesn't know the address of the main package when laying down the runtime
 	fn()
 	close(main_init_done
