@@ -236,7 +236,7 @@ func (server *Server) ServeCodec(codec ServerCodec) {
 	sending := new(sync.Mutex) // 写response内容时需要加锁
 	wg := new(sync.WaitGroup)
 	for {
-        // 从连接中读取请求
+        // 从连接中读取请求，主要是通过gobEncoder实现
 		service, mtype, req, argv, replyv, keepReading, err := server.readRequest(codec)
 		if err != nil {
 			if debugLog && err != io.EOF {
@@ -280,7 +280,7 @@ func (s *service) call(server *Server, sending *sync.Mutex, wg *sync.WaitGroup, 
 	if errInter != nil {
 		errmsg = errInter.(error).Error()
 	}
-    // 写入响应结果
+    // 写入响应结果，这里主要通过gob.Decoder实现
 	server.sendResponse(sending, req, replyv.Interface(), codec, errmsg)
 	// 释放req
     server.freeRequest(req)
