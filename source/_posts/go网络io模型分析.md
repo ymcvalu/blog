@@ -328,7 +328,7 @@ func netpollinit() {
 		return
 	}
     // 这边的1024是历史原因，只要大于0就好了
-    // 原先epoll底层使用hash表实现，需要传入一个size指定hash表的大小，后面基于rb-tree实现，因此这个参数没有实际意义了
+    // 原先epoll底层使用hash表实现，需要传入一个size指定hash表的大小，后面基于rb-tree实现，因此这个参数没有实际意义了，大于0即可
 	epfd = epollcreate(1024)
 	if epfd >= 0 {
 		closeonexec(epfd)
@@ -654,9 +654,9 @@ retry:
 			mode += 'w'
 		}
 		if mode != 0 {
-            // 去除pollDesc
+            // 从ev.data取出pollDesc，还记得上面分析过，在加入epoll时会把对应的pollDesc保存到ev.Data中，而协程阻塞时会把g指针保存在pollDesc中的rg或者wg中
 			pd := *(**pollDesc)(unsafe.Pointer(&ev.data))
-			// 这里执行netpollready，唤醒对应阻塞的协程
+			// 这里执行netpollready，把对应阻塞的g加到gp链表头部
 			netpollready(&gp, pd, mode)
 		}
 	}
@@ -669,7 +669,7 @@ retry:
 func netpollready(gpp *guintptr, pd *pollDesc, mode int32) {
 	var rg, wg guintptr
 	if mode == 'r' || mode == 'r'+'w' {
-        // 这里
+        // 这里调用了netpollunblock，获取对应的g
 		rg.set(netpollunblock(pd, 'r', true))
 	}
 	if mode == 'w' || mode == 'r'+'w' {
@@ -769,6 +769,7 @@ func (fd *netFD) Read(p []byte) (n int, err error) {
 
 ```go
 func (fd *FD) Read(p []byte) (int, error) {
+    // 这里执行对应的加锁操作
 	...
 	for {
         // 首先尝试直接读，如果无可读内容，因为是非阻塞模式，会返回EAGAIN
@@ -798,6 +799,7 @@ func (fd *FD) Read(p []byte) (int, error) {
 
 ```go
 func (fd *FD) Write(p []byte) (int, error) {
+    // 这里执行对应的加锁操作
 	...
     // 记录已经写入字节数
 	var nn int
@@ -845,7 +847,143 @@ func (pd *pollDesc) wait(mode int, isFile bool) error {
 }
 ```
 
+### 差点被遗忘的close
 
+接着来看一下`Close`方法，实际执行的是：
+
+```go
+func (c *conn) Close() error {
+	if !c.ok() {
+		return syscall.EINVAL
+	}
+    // 这里执行netFD.Close
+	err := c.fd.Close()
+	if err != nil {
+		err = &OpError{Op: "close", Net: c.fd.net, Source: c.fd.laddr, Addr: c.fd.raddr, Err: err}
+	}
+	return err
+}
+
+func (fd *netFD) Close() error {
+    // 清除finalizer
+	runtime.SetFinalizer(fd, nil)
+    // 调用poll.FD的Close方法
+	return fd.pfd.Close()
+}
+
+
+func (fd *FD) Close() error {
+	if !fd.fdmu.increfAndClose() {
+		return errClosing(fd.isFile)
+	}
+
+	// 这里evict方法唤醒所有阻塞读写的g
+	fd.pd.evict()
+	// 减少引用，如果引用为0则关闭
+	err := fd.decref()
+
+	if fd.isBlocking == 0 {
+		runtime_Semacquire(&fd.csema)
+	}
+
+	return err
+}
+
+func (pd *pollDesc) evict() {
+	if pd.runtimeCtx == 0 {
+		return
+	}
+	runtime_pollUnblock(pd.runtimeCtx)
+}
+
+func poll_runtime_pollUnblock(pd *pollDesc) {
+	lock(&pd.lock)
+	if pd.closing {
+		throw("runtime: unblock on closing polldesc")
+	}
+	pd.closing = true
+	pd.seq++
+	var rg, wg *g
+	atomicstorep(unsafe.Pointer(&rg), nil)
+    // 获取阻塞的g
+	rg = netpollunblock(pd, 'r', false)
+	wg = netpollunblock(pd, 'w', false)
+	if pd.rt.f != nil {
+		deltimer(&pd.rt)
+		pd.rt.f = nil
+	}
+	if pd.wt.f != nil {
+		deltimer(&pd.wt)
+		pd.wt.f = nil
+	}
+	unlock(&pd.lock)
+	if rg != nil {
+        // 调用goready唤醒g
+		netpollgoready(rg, 3)
+	}
+	if wg != nil {
+        // 唤醒g
+		netpollgoready(wg, 3)
+	}
+}
+
+
+func (fd *FD) decref() error {
+	// 减少引用，如果引用为0，则返回true
+    if fd.fdmu.decref() {
+        // 关闭连接
+		return fd.destroy()
+	}
+	return nil
+}
+
+func (fd *FD) destroy() error {
+	// 调用runtime_pollClose方法
+	fd.pd.close()
+    // var CloseFunc func(int) error = syscall.Close
+    // 这里的CloseFunc就是系统调用close
+	err := CloseFunc(fd.Sysfd)
+	fd.Sysfd = -1
+	runtime_Semrelease(&fd.csema)
+	return err
+}
+
+func (pd *pollDesc) close() {
+	if pd.runtimeCtx == 0 {
+		return
+	}
+	runtime_pollClose(pd.runtimeCtx)
+	pd.runtimeCtx = 0
+}
+
+func poll_runtime_pollClose(pd *pollDesc) {
+	if !pd.closing {
+		throw("runtime: close polldesc w/o unblock")
+	}
+	if pd.wg != 0 && pd.wg != pdReady {
+		throw("runtime: blocked write on closing polldesc")
+	}
+	if pd.rg != 0 && pd.rg != pdReady {
+		throw("runtime: blocked read on closing polldesc")
+	}
+    // 从epoll中删除fd
+	netpollclose(pd.fd)
+    // 释放pollDesc
+	pollcache.free(pd)
+}
+
+func netpollclose(fd uintptr) int32 {
+	var ev epollevent
+    // 系统调用epoll_ctl删除对应的fd
+	return -epollctl(epfd, _EPOLL_CTL_DEL, int32(fd), &ev)
+}
+```
+
+综上，关闭一个连接时：
+
+1. 设置pollDesc相关flag为已关闭，唤醒该连接上阻塞的协程
+2. 减少对应poll.FD的引用，如果引用为0，则只需真正的关闭
+3. 执行关闭操作，先从epoll删除对应的fd，然后执行close系统调用关闭
 
 ### 最后
 
