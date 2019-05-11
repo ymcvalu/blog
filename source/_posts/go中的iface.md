@@ -247,11 +247,7 @@ func convT2I(tab *itab, elem unsafe.Pointer) (i iface) {
 
 
 
-### itab生成
-
-有的接口赋值在编译时可以分析，因此可以直接生成itab表，但是有的是运行时动态赋值的（比如接口断言），因此需要运行时动态生成itab表
-
-##### 接口类型转换
+### 接口类型转换
 
 ```go
 // 接口转换
@@ -285,11 +281,11 @@ var rc io.Reader = XXX{}
 _ = io.ReaderCloser(rc) // no
 ```
 
-
-
-##### 接口类型断言
+### 接口类型断言
 
 **接口断言：根据接口值的实际类型，判断是否实现了目标接口**
+
+类型断言时，可能需要在运行时动态生成itab
 
 ```go
 // 接口断言
@@ -448,7 +444,21 @@ imethods:
 
 
 
-### 引用
+### 其他
+
+因为go中的接口是隐式实现的，我们可以在声明类型的时候，使用一些断言来加入编译时的检查，并且也可以提示其他人该类型实现了某个接口，比如我们声明了类型`T`实现了接口`I`，我们可以：
+
+```go
+type I interface{}
+
+var _ I = new(T) // 这里断言T实现了接口I
+type T struct{}
+
+```
+
+
+
+### 参考
 
 <https://github.com/teh-cmc/go-internals/tree/master/chapter2_interfaces>
 
