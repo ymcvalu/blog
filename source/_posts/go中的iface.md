@@ -5,25 +5,26 @@ tags:
 	- go
 	- interface
 ---
+# iface
 
-# iface - go中的非空接口
-
-本文稍微总结一下`go`中的`iface`这个结构的一些内容
-
-###  结构
+### 结构
 
 ```go
 type iface struct {
 	tab  *itab
-	data unsafe.Pointer
+	data unsafe.Pointer // 这里的data不是直接指向接口背后的实际值，而是指向实际值的拷贝
 }
 
+// layout of Itab known to compilers
+// allocated in non-garbage-collected memory
+// Needs to be in sync with
+// ../cmd/compile/internal/gc/reflect.go:/^func.dumptypestructs.
 type itab struct {
 	inter *interfacetype // 接口类型
 	_type *_type // 实际类型
 	hash  uint32 // copy of _type.hash. Used for type switches.
 	_     [4]byte // 4字节填充，与上面的4字节hash凑成8字节，与n内存对齐相关
-    // itab末尾是实现方法的引用，如果多于1个，则其余方法引用紧跟itab内存之后分配，有点像c++的虚函数表
+    // itab末尾是实现方法的引用，如果多余1个，则其余方法引用紧跟itab内存之后分配
 	fun   [1]uintptr // variable sized. fun[0]==0 means _type does not implement inter.
 }
 
@@ -33,6 +34,10 @@ type interfacetype struct {
 	mhdr    []imethod // 接口声明的方法
 }
 
+
+// Needs to be in sync with ../cmd/link/internal/ld/decodesym.go:/^func.commonsize,
+// ../cmd/compile/internal/gc/reflect.go:/^func.dcommontype and
+// ../reflect/type.go:/^type.rtype.
 type _type struct {
 	size       uintptr
 	ptrdata    uintptr  // size of memory prefix holding all pointers
@@ -56,26 +61,24 @@ type _type struct {
 ```go
 type uncommontype struct {
 	pkgpath nameOff
-	mcount  uint16 // 类型声明的方法数
-	xcount  uint16 // 导出的方法数
-	moff    uint32 // 该类型的函数引用列表偏移
-	_       uint32 // unused，内存对齐相关
+	mcount  uint16 // number of methods
+	xcount  uint16 // number of exported methods
+	moff    uint32 // offset from this uncommontype to [mcount]method
+	_       uint32 // unused
 }
 
 func (t *_type) uncommon() *uncommontype {
-	if t.tflag&tflagUncommon == 0 { // 如果是common类型，直接返回，即没有声明方法
+	if t.tflag&tflagUncommon == 0 {
 		return nil
 	}
-    // 不同Kind的类型，其类型结构不一样
-    // go中可以基于其他类型声明新的类型，类型种类是无穷的，但是Kind就那么几种，struct、slice、map、chan、int、uint、float、bool、array、ptr、interface ...
 	switch t.kind & kindMask {
-	case kindStruct: 
-		type u struct { 
+	case kindStruct:
+		type u struct {
 			structtype
 			u uncommontype
 		}
 		return &(*u)(unsafe.Pointer(t)).u
-	case kindPtr: 
+	case kindPtr:
 		type u struct {
 			ptrtype
 			u uncommontype
@@ -188,13 +191,67 @@ go.itab."".Arr,io.Reader SRODATA dupok size=32
 
 可以看到，实现接口的方法引用列表会保存在itab末尾，调用时，需要先计算具体调用函数的偏移获取实际方法引用
 
+上面生成接口值的时候，调用了`runtime.convT2Islice`方法，其实在`runtime.iface.go`中声明了一系列`runtime.convT2IXXX`的方法，表示将`XXX`类型的值转换成一个接口值，因为这里的例子中，`Arr`的`Kind`是`slice`，因此调用的是`runtime.convT2Islice`这个方法。
+
+下面我们来看一下`convT2Islice`和`convT2I`这两个方法的实现。
+
+先来看`convT2Islice`：
+
+```go
+// 参数elem实际上是一个slice的指针
+// 将一个实际类型的值转换成接口值这种情况，itab由编译器自动生成
+func convT2Islice(tab *itab, elem unsafe.Pointer) (i iface) {
+	t := tab._type //这里的_type就是该接口背后的真实数据类型
+	if raceenabled {
+		raceReadObjectPC(t, elem, getcallerpc(), funcPC(convT2Islice))
+	}
+	if msanenabled {
+		msanread(elem, t.size)
+	}
+	var x unsafe.Pointer
+    // 如果切片的底层数组是nil
+	if v := *(*slice)(elem); uintptr(v.array) == 0 {
+		x = unsafe.Pointer(&zeroVal[0])
+	} else {
+		x = mallocgc(t.size, t, true) // 分配一个slice
+		*(*slice)(x) = *(*slice)(elem) // 赋值
+	}
+	i.tab = tab
+	i.data = x // 返回的接口值中的data指向的内存是elem的拷贝
+	return
+}
+```
+
+然后是`convT2I`，这个是比较通用的转换方法：
+
+```go
+// 这里的elem是要转换成接口值的实际值的指针
+// 由实际类型转换成接口类型的情况，itab由编译器自动生成
+func convT2I(tab *itab, elem unsafe.Pointer) (i iface) {
+	t := tab._type 
+	if raceenabled {
+		raceReadObjectPC(t, elem, getcallerpc(), funcPC(convT2I))
+	}
+	if msanenabled {
+		msanread(elem, t.size)
+	}
+	x := mallocgc(t.size, t, true) // 这里根据*elem的大小分配一块内存
+	typedmemmove(t, x, elem) // 内存拷贝
+	i.tab = tab
+	i.data = x
+	return
+}
+```
+
+比如我们把一个指针值赋给一个接口变量，调用`convT2I`方法时，`elem`就是指针的指针了。**这里我们也可以看到，`iface.data`不是直接指向接口背后的实际值，而是指向其拷贝，因为这个原因，也就很好理解为什么方法接收者是指针的话，值类型就不会实现对应的接口类型了。**
 
 
-### 接口类型转换与itab生成
+
+### itab生成
 
 有的接口赋值在编译时可以分析，因此可以直接生成itab表，但是有的是运行时动态赋值的（比如接口断言），因此需要运行时动态生成itab表
 
-##### 接口类型强制转换
+##### 接口类型转换
 
 ```go
 // 接口转换
