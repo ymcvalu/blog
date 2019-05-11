@@ -446,3 +446,9 @@ imethods:
 }
 ```
 
+
+
+### 引用
+
+<https://github.com/teh-cmc/go-internals/tree/master/chapter2_interfaces>
+
