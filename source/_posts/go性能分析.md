@@ -8,6 +8,14 @@ tags:
 
 本文总结一下go中用来进行性能调试的方法，先占个坑，后面慢慢完善\~\~\~
 
-### Pprof
+### go tool pprof
 
-go中自带了pprof工具，用来
+### go tool trace 
+
+### GODEBUG
+
+
+
+### 参考文档
+
+- [high-performance-go-workshop](<https://dave.cheney.net/high-performance-go-workshop/dotgo-paris.html>)
