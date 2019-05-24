@@ -181,8 +181,10 @@ func Myers(ab Diffable) EditScript {
 search:
 	// myers
     // 从0到max遍历d
+    // d==0的时候，可能执行MOV操作，即(d,v)=(0,0)的时候，x不一定为0
 	for d := 0; d <= max; d++ {
-        // 保存上一轮迭代的v，第一次迭代时对应的d=0,k=0,x=0
+        // 保存上一轮迭代的v
+        // 第一次迭代的时候，保存一个空的v，方便后面的回溯
 		vc := make([]int, 2*max+1)
 		copy(vc, v)
         // trace[d]保存的是d-1轮的v
