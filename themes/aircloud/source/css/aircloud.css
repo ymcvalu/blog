@@ -637,7 +637,7 @@ body {
   letter-spacing: 1px;
 }
 .post-content p img {
-  width: 80%;
+  width: auto;
 }
 .post-content ul,
 .post-content ol {
