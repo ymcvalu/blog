@@ -10,11 +10,11 @@ tags:
 
 ### 相关包
 
-`go`的官方库提供了这么几个包，可以帮我们解析`go`的源文件：
+`go`的官方库提供了几个包，可以帮我们解析`go`的源文件，主要有：
 
 - go/scanner：词法解析，将源代码分割成一个个token
 - go/token：token类型及相关结构体定义
-- go/ast：抽象语法结构及相关方法
+- go/ast：ast的结构定义及相关操作方法
 - go/parser：语法分析，读取token流生成ast
 
 
@@ -27,7 +27,35 @@ tags:
 
 
 
-### 源码一瞥
+### ast: 抽象语法树
+
+ast是源代码结构的一种抽象表示，以树状形式来表达编程语言的语法结构。
+
+比如表达式 `a+b`，对应的ast为：
+
+![](/img/ast1.png)
+
+对应使用go表示的结构：
+
+```go
+*ast.BinaryExpr { // a+b是一个二元表达式
+.  X: *ast.Ident { // X表示第一个操作数
+.  .  NamePos: 1
+.  .  Name: "a"
+.  .  }
+.  }
+.  OpPos: 2
+.  Op: + // 操作符
+.  Y: *ast.Ident { // Y表示第二个操作数
+.  .  NamePos: 3
+.  .  Name: "b"
+.  }
+}
+```
+
+
+
+### 源码解析
 
 首先要知道具体的接口怎么用，才知道源码从哪个入口开始看是吧
 
@@ -365,5 +393,3 @@ func genTag(st *ast.StructType) {
 ```
 
 [完整代码](<https://github.com/ymcvalu/auto-tag>)
-
-[另一个demo，自动代码生成](<https://github.com/ymcvalu/enhance/blob/master/enhance/main.go>)
