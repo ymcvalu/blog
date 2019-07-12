@@ -910,7 +910,7 @@ pre,
   padding: 0;
   font-size: 13px;
   color: #4d4d4c;
-  background: #f7f7f7;
+  background: #ffffff;
   line-height: 1.6;
 }
 pre,
@@ -975,7 +975,7 @@ pre code {
   width: 100%;
   padding-left: 10px;
   padding-right: 10px;
-  background-color: #f7f7f7;
+  background-color: #231c1c;
 }
 .highlight .line {
   height: 20px;
@@ -1002,7 +1002,7 @@ pre .meta {
   color: #8959a8;
 }
 pre .comment {
-  color: #8e908c;
+  color: #70d060;
 }
 pre .variable,
 pre .attribute,
