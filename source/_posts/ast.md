@@ -83,7 +83,7 @@ func main() {
 
 首先来看第12行代码，这里创建了一个`FileSet`，顾名思义，`FileSet`就是源文件集合，因为我们一次解析可能不止解析一个文件，而是一系列文件。
 
-`FileSet`最主要的用途是用来保存`token`的位置信息，每个token在当前文件的位置可以用行号，列号，token在当前文件中的偏移量这三个属性来描述，使用`Position`这个结构体来描述，`FileSet`中保存所有`token`的`Position`信息，而在`ast`中，只保存一个`Pos`索引。当遍历`ast`的时候，我们需要使用`Pos`索引向`FileSet`获取`Position`。
+`FileSet`最主要的用途是用来保存`token`的位置信息，每个token在当前文件的位置可以用行号，列号，token在当前文件中的偏移量这三个属性来描述，使用[`Position`](<https://github.com/golang/go/blob/master/src/go/token/position.go#L20>)这个结构体来描述，`FileSet`中保存所有`token`的`Position`信息，而在`ast`中，只保存一个[`Pos`](<https://github.com/golang/go/blob/master/src/go/token/position.go#L76>)索引。当遍历`ast`的时候，我们需要使用`Pos`索引向[`FileSet`]()获取`Position`。
 
 现在来看一下14行`parser.ParseFile`这个方法，这个方法实现了语法分析。
 
