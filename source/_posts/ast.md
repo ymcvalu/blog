@@ -19,11 +19,11 @@ tags:
 
 
 
-### 为什么需要使用解析源文件
+### 能做什么
 
 通过解析源文件，我们可以得到`ast`(抽象语法树)。
 
-而通过遍历`ast`，我们可以得到源码中声明的结构体、方法、类型等等信息，并根据实际需要生成具体的代码，比如自动生成`tag`，模板方法、手动实现泛型效果等。而且，go的注释在解析时是可以保留的，这就可以实现`java`中类似`annotation`的功能，比如根据注释自动生成接口文档（beego的swagger），根据注释提取接口权限信息实现统一权限校验等。
+而通过遍历`ast`，我们可以得到源码中声明的结构体、方法、类型等等信息，并根据实际需要[生成具体的代码](<https://github.com/ymcvalu/enhance/tree/master/enhance>)，比如自动生成`tag`，模板方法、手动实现泛型效果等。而且，go的注释在解析时是可以保留的，这就可以实现`java`中类似`annotation`的功能，比如根据注释自动生成接口文档（[beego的swagger文档生成](<https://github.com/astaxie/beego/blob/develop/swagger/swagger.go>)），根据注释提取接口权限信息实现统一权限校验等。
 
 
 
