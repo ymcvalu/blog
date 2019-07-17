@@ -8,8 +8,6 @@ tags:
 
 # go ast
 
-### 相关包
-
 `go`的官方库提供了几个包，可以帮我们解析`go`的源文件，主要有：
 
 - [go/scanner](<https://github.com/golang/go/blob/master/src/go/scanner/scanner.go>)：词法解析，将源代码分割成一个个token
@@ -19,11 +17,15 @@ tags:
 
 
 
-### 能做什么
-
 通过解析源文件，我们可以得到`ast`(抽象语法树)。
 
-而通过遍历`ast`，我们可以得到源码中声明的结构体、方法、类型等等信息，并根据实际需要[生成具体的代码](<https://github.com/ymcvalu/enhance/tree/master/enhance>)，比如自动生成`tag`，模板方法、手动实现泛型效果等。而且，go的注释在解析时是可以保留的，这就可以实现`java`中类似`annotation`的功能，比如根据注释自动生成接口文档（[beego的swagger文档生成](<https://github.com/astaxie/beego/blob/develop/swagger/swagger.go>)），根据注释提取接口权限信息实现统一权限校验等。
+而通过遍历`ast`，我们可以得到源码中声明的结构体、方法、类型等等信息，并根据实际需要[生成具体的代码](<https://github.com/ymcvalu/enhance/tree/master/enhance>)，比如自动生成`tag`，模板方法、手动实现泛型效果等。而且，go的注释在解析时是可以保留的，这就可以实现`java`中类似`annotation`的功能，比如根据注释自动生成接口文档（[beego的swagger文档生成](<https://github.com/beego/bee/blob/develop/generate/swaggergen/g_docs.go>)），根据注释提取接口权限信息实现统一权限校验等。
+
+
+
+解析过程：
+
+词法分析，将源代码分割成一个个token -> 语法分析，根据[go语言的文法](<https://golang.org/ref/spec>)对token流进行规约/推导 -> 生成ast
 
 
 
@@ -40,14 +42,11 @@ ast是源代码结构的一种抽象表示，以树状形式来表达编程语�
 ```go
 *ast.BinaryExpr { // a+b是一个二元表达式
 .  X: *ast.Ident { // X表示第一个操作数
-.  .  NamePos: 1
 .  .  Name: "a"
 .  .  }
 .  }
-.  OpPos: 2
 .  Op: + // 操作符
 .  Y: *ast.Ident { // Y表示第二个操作数
-.  .  NamePos: 3
 .  .  Name: "b"
 .  }
 }
@@ -88,7 +87,7 @@ func main() {
 
 现在来看一下14行`parser.ParseFile`这个方法，这个方法实现了语法分析。
 
-词法分析是和语法分析同时进行的，`go`的语法分析，总体上基于`LL1`从左到右，自上而下，最多向前看一个token来推导文法，但是有个别地方存在文法二义性的情况，比如当遇到一个`<-`的时候，可能是`<- chan type`，表示声明一个只读channel，也可能是`<- expr`，表示从一个channel中读取，这时候会先解析`<-`后面的内容，然后根据具体`node`的类型来决定当前是使用哪个文法进行推到。
+词法分析是和语法分析同时进行的，`go`的语法分析，总体上基于`LL1`的自上而下推导过程，最多向前看一个token来推导文法，但是有个别地方存在文法二义性的情况，比如当遇到一个[`<-`](<https://github.com/golang/go/blob/master/src/go/parser/parser.go#L1529>)的时候，可能是`<- chan type`，表示声明一个只读channel，也可能是`<- expr`，表示从一个channel中读取，这时候会先解析`<-`后面的内容，然后根据具体`node`的类型来决定当前是使用哪个文法进行推到。
 
 ```go
 func ParseFile(fset *token.FileSet, filename string, src interface{}, mode Mode) (f *ast.File, err error) {
@@ -155,7 +154,7 @@ var globalNum int // this is a comment
 
 第一种是注释独自自己占一到多行的，后一种则是跟语句在同一行。`parser.next`方法中，读取`token`时，如果遇到第一种注释，会保存到`parser.leadComment`，如果是第二种注释，则保存到`parser.lineComment`中，最终会保留到具体的`ast`中的节点中。
 
-接着来看一下`parser.parseFile`方法
+接着来看一下[`parser.parseFile`](<https://github.com/golang/go/blob/master/src/go/parser/parser.go#L2500>)方法
 
 ```go
 func (p *parser) parseFile() *ast.File {
