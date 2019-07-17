@@ -12,10 +12,10 @@ tags:
 
 `go`的官方库提供了几个包，可以帮我们解析`go`的源文件，主要有：
 
-- go/scanner：词法解析，将源代码分割成一个个token
-- go/token：token类型及相关结构体定义
-- go/ast：ast的结构定义及相关操作方法
-- go/parser：语法分析，读取token流生成ast
+- [go/scanner](<https://github.com/golang/go/blob/master/src/go/scanner/scanner.go>)：词法解析，将源代码分割成一个个token
+- [go/token](<https://github.com/golang/go/blob/master/src/go/token/token.go>)：token类型及相关结构体定义
+- [go/ast](<https://github.com/golang/go/blob/master/src/go/ast/ast.go>)：ast的结构定义
+- [go/parser](<https://github.com/golang/go/blob/master/src/go/parser/parser.go#L17>)：语法分析，读取token流生成ast
 
 
 
