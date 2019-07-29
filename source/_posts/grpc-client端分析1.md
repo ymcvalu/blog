@@ -11,9 +11,9 @@ tags:
 
 我们先来看一下创建`grpc`连接时的主要流程：
 
-![](../img/grpc_client1.png)
+![](/img/grpc_client1.png)
 
-![](../img/grpc_client2.png)
+![](/img/grpc_client2.png)
 
 
 
