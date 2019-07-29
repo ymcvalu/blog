@@ -756,3 +756,6 @@ func DialContext(ctx context.Context, target string, opts ...DialOption) (conn *
 
 
 
+##### 总结
+
+到此，对grpc客户端的连接创建流程应该有了一个大体的了解，并且我们能够很容易的根据`Resolver`接口提供自己的服务发现逻辑。
