@@ -35,7 +35,7 @@ gc # @#s #%: #+#+# ms clock, #+#/#/#+# ms cpu, #->#-># MB, # MB goal, # P [(forc
 - `#%`：从程序开始到现在运行`gc`的时间占比
 - `#+#+# ms clock`：对应 <font color=red>第一次`STW`，终止`SWEEP`、开启写屏障</font> +  <font color=red>并发`Mark`和`Scan`</font> + <font color=red>第二次`STW`，结束`Mark`</font> 这三个阶段`wall-clock`的耗时，单位为`ms`
 - `#+#/#/#+# ms cpu`：对应 <font color=red>第一次`STW`</font> + <font color=red>并发标记：`Assist Time `</font>/<font color=red> 并发标记：`Background GC time`</font> /<font color=red> 并发标记：`Idle GC time`</font> + <font color=red>第二次`STW`结束`Mark`</font> 这几个阶段的`cpu`时间，单位`ms`
-- `#->#-># MB `：分别对应`gc`开始时、`gc`结束时和`live heap`（在此次`gc`中标记为存活）的`heap size`
+- `#->#-># MB `：分别对应`gc`开始时的堆大小、`gc`结束时的堆大小以及`live heap`的大小
 
 - `# MB goal`：目标`heap size`
 - `# P`：使用的`P`数量
