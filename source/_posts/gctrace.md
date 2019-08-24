@@ -69,11 +69,11 @@ scvg1: inuse: 4, idle: 58, sys: 63, released: 0, consumed: 63 (MB)
 
 在`go1.5`之前，运行`gc mark`阶段会`stop the world`， 能够根据`next_gc`变量（也就是**goal heap size**，可以直接通过`GOGC`变量调整）精确地控制堆内存的增长：
 
-![](../img/gc_stw.jpg)
+![](/img/gc_stw.jpg)
 
 但是`go1.5`之后，`gc mark`可以跟用户协程并发运行，因此在`gc`执行过程中仍然会有新的内存被分配，因此`gc`的触发点需要相对`next_gc`提前：
 
-![](../img/gc_bg.jpg)
+![](/img/gc_bg.jpg)
 
 如上图所示，`Hm(n-1)`表示上一次`gc`结束后的堆大小,而`Hg`是`next_gc`，而我们在`Ht`触发`gc`，因为gc过程中可能会有新的内存分配，当`gc`结束时，当前的堆大小为`Ha`。`go`的`gc`实现，需要提供一种动态调整的机制，根据内存分配情况调整`Ht`的值，使得`Ha`能够与`Hg`尽量接近。
 
