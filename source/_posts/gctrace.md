@@ -35,7 +35,7 @@ gc # @#s #%: #+#+# ms clock, #+#/#/#+# ms cpu, #->#-># MB, # MB goal, # P [(forc
 - `#%`：从程序开始到现在运行`gc`的时间占比
 - `#+#+# ms clock`：对应 <font color=red>第一次`STW`，终止`SWEEP`、开启写屏障</font> +  <font color=red>并发`Mark`和`Scan`</font> + <font color=red>第二次`STW`，结束`Mark`</font> 这三个阶段`wall-clock`的耗时，单位为`ms`
 - `#+#/#/#+# ms cpu`：对应 <font color=red>第一次`STW`</font> + <font color=red>并发标记：`Assist Time `</font>/<font color=red> 并发标记：`Background GC time`</font> /<font color=red> 并发标记：`Idle GC time`</font> + <font color=red>第二次`STW`结束`Mark`</font> 这几个阶段的`cpu`时间，单位`ms`
-- `#->#-># MB `：分别对应`gc`开始时的堆大小、`gc`结束时的堆大小以及`live heap`的大小
+- `#->#-># MB `：分别对应`gc`开始时的堆大小、`gc`结束时的堆大小以及`live heap`（`gc mark`阶段标记为黑色的内存总量）的大小
 
 - `# MB goal`：目标`heap size`
 - `# P`：使用的`P`数量
@@ -67,7 +67,19 @@ scvg1: inuse: 4, idle: 58, sys: 63, released: 0, consumed: 63 (MB)
 >  proportion to the allocation cost. Adjusting GOGC just changes the linear constant
 >  (and also the amount of extra memory used).
 
-我们可以通过设置`GOGC`的值来调整`gc`的触发阈值：
+在`go1.5`之前，运行`gc mark`阶段会`stop the world`， 能够根据`next_gc`变量（也就是**goal heap size**，可以直接通过`GOGC`变量调整）精确地控制堆内存的增长：
+
+![](../img/gc_stw.jpg)
+
+但是`go1.5`之后，`gc mark`可以跟用户协程并发运行，因此在`gc`执行过程中仍然会有新的内存被分配，因此`gc`的触发点需要相对`next_gc`提前：
+
+![](../img/gc_bg.jpg)
+
+如上图所示，`Hm(n-1)`表示上一次`gc`结束后的堆大小,而`Hg`是`next_gc`，而我们在`Ht`触发`gc`，因为gc过程中可能会有新的内存分配，当`gc`结束时，当前的堆大小为`Ha`。`go`的`gc`实现，需要提供一种动态调整的机制，根据内存分配情况调整`Ht`的值，使得`Ha`能够与`Hg`尽量接近。
+
+
+
+总体来说，我们可以通过设置`GOGC`的值来调整`gc`的触发阈值：
 
 - **当小于零或者等于`off`时，将会关闭`gc`**
 - 设置较大的值：减少`gc`触发，但是会增加内存占用
