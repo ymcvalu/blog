@@ -3,9 +3,9 @@
 ## Source: https://github.com/hexojs/hexo/
 
 # Site
-title: gopher
+title: mcll
 subtitle:
-description: 
+description: gopher
 keywords:
 author: can
 language: zh
@@ -104,9 +104,9 @@ live2d:
     use: live2d-widget-model-miku
   display:
     position: right
-    width: 300
-    height: 600
+    width: 200
+    height: 400
   mobile:
-    show: true
+    show: false
   react:
     opacity: 0.6
