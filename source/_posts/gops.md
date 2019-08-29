@@ -14,7 +14,7 @@ $ go get -u github.com/google/gops
 ```
 
 ### 简单使用
-###### 查看命令帮助
+##### 查看命令帮助
 ```sh
 $ gops 
 gops is a tool to list and diagnose Go processes.
@@ -39,7 +39,7 @@ All commands require the agent running on the Go process.
 "*" indicates the process is running the agent.
 ```
 
-###### 查看当前系统的go进程
+##### 查看当前系统的go进程
 ```sh
 $ gops 
 3348  3088  docker-containerd       go1.7.5  /usr/bin/docker-containerd
@@ -55,7 +55,7 @@ pid ppid 二进制文件名 go编译版本 二进制文件路径
 ```
 而在go编译版本前面的 `*` 表明当前进程包含了`agent`。
 
-###### 查看某个进程的信息
+##### 查看某个进程的信息
 ```sh
 $ gops 29573
 parent PID:	27413
@@ -111,8 +111,9 @@ $ gops <cmd> <pid|agent-addr>
 > - trace：运行5s的 runtime tracer，并启动一个`http server`用于查看trace信息
 > - pprof-heap：读取heap的profile并启动`go tool pprof`
 > - pprof-cpu：读取cpu之后30s的profile并启动`go tool pprof`
+```
 
-###### 查看内存统计
+##### 查看内存统计
 ```sh
 $ gops memstats 29573
 alloc: 196.65KB (201368 bytes) # 当前分配的堆对象字节数，同下面的`heap-alloc`
@@ -161,7 +162,7 @@ func ReadMemStats(m *MemStats) {
 }
 ```
 
-###### 设置gc触发百分比
+##### 设置gc触发百分比
 默认`gc`的触发百分比是`100%`
 
 查看当前`gc`触发比例：
