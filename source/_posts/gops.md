@@ -101,17 +101,16 @@ $ gops
 ```sh
 $ gops <cmd> <pid|agent-addr>
 ```  
-
-> Commands:
-> - stack：查看进程栈信息
-> - gc：手动触发一次`gc`，并阻塞等到`gc`结束
-> - setgc：相当于设置`GOGC`值
-> - memstats：查看进程的内存统计信息
-> - version：查看构建二进制程序的go版本
-> - stats：查看runtimes的统计信息，主要是goroutine数量和thread数量
-> - trace：运行5s的 runtime tracer，并启动一个`http server`用于查看trace信息
-> - pprof-heap：读取heap的profile并启动`go tool pprof`
-> - pprof-cpu：读取cpu之后30s的profile并启动`go tool pprof`
+Commands:
+- `stack`：查看进程栈信息
+- `gc`：手动触发一次`gc`，并阻塞等到`gc`结束
+- `setgc`：相当于设置`GOGC`值
+- `memstats`：查看进程的内存统计信息
+- `version`：查看构建二进制程序的go版本
+- `stats`：查看runtimes的统计信息，主要是goroutine数量和thread数量
+- `trace`：运行5s的 runtime tracer，并启动一个`http server`用于查看trace信息
+- `pprof-heap`：读取heap的profile并启动`go tool pprof`
+- `pprof-cpu`：读取cpu之后30s的profile并启动`go tool pprof`
 
 
 ##### 查看内存统计
