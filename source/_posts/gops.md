@@ -100,7 +100,8 @@ $ gops
 开启了`agent`之后，我们就可以使用`gops`强大的诊断功能了
 ```sh
 $ gops <cmd> <pid|agent-addr>
-```  
+```
+
 Commands:
 - `stack`：查看进程栈信息
 - `gc`：手动触发一次`gc`，并阻塞等到`gc`结束
