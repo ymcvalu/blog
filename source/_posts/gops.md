@@ -170,7 +170,7 @@ func ReadMemStats(m *MemStats) {
 ```sh
 $ gops memstats 29573
 ...
-next-gc: when heap-alloc >= 4.00MB (4194304 bytes) # 4MB是初始值
+next-gc: when heap-alloc >= 4.00MB (4194304 bytes) 
 ...
 ```
 当前的触发时机是，`heap-alloc`达到4MB
@@ -189,7 +189,7 @@ next-gc: when heap-alloc >= 8.00MB (8388608 bytes)
 ```go
 next_gc = heap_marked + heap_marked*uint64(gcpercent)/100
 ```
-`heap_marked`表示在一次`gc`中，标记为存活的总对象大小，程序刚开始时初始化为`4MB`，而`gcpercent`就是我们设置的`gc`触发比例，默认为`100`。
+`heap_marked`表示在一次`gc`中，标记为存活的总对象大小，而`gcpercent`就是我们设置的`gc`触发比例，默认为`100`。
 
 **注意：比如`next_gc`为`8MB`，并不是真的等到总共分配了8MB的对象才触发GC**。`这个next_gc`实际上是`gc`后的`goal heap size`。现在的`gc`实现，对象标记与业务代码会并发执行，而在业务代码中还会申请分配新的对象。如果真的等到`next_gc`才触发`gc`，那么等到`gc`结束之后，当前的`heap size`可能会大于`next_gc`，因此实际上`gc`的触发会提前一点（有另一个字段`gc_trigger`来决定）。
 
