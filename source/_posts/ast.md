@@ -85,10 +85,7 @@ func main() {
 
 `FileSet`最主要的用途是用来保存`token`的位置信息，每个token在当前文件的位置可以用行号，列号，token在当前文件中的偏移量这三个属性来描述，使用[`Position`](<https://github.com/golang/go/blob/master/src/go/token/position.go#L20>)这个结构体来描述，`FileSet`中保存所有`token`的`Position`信息，而在`ast`中，只保存一个[`Pos`](<https://github.com/golang/go/blob/master/src/go/token/position.go#L76>)索引。当遍历`ast`的时候，我们需要使用`Pos`索引向[`FileSet`]()获取`Position`。
 
-现在来看一下14行`parser.ParseFile`这个方法，这个方法实现了语法分析。
-
-词法分析是和语法分析同时进行的，`go`的语法分析，总体上基于`LL1`的自上而下推导过程，最多向前看一个token来推导文法，但是有个别地方存在文法二义性的情况，比如当遇到一个[`<-`](<https://github.com/golang/go/blob/master/src/go/parser/parser.go#L1529>)的时候，可能是`<- chan type`，表示声明一个只读channel，也可能是`<- expr`，表示从一个channel中读取，这时候会先解析`<-`后面的内容，然后根据具体`node`的类型来决定当前是使用哪个文法进行推到。
-
+现在来看一下14行`parser.ParseFile`这个方法，这个方法实现了语法分析：
 ```go
 func ParseFile(fset *token.FileSet, filename string, src interface{}, mode Mode) (f *ast.File, err error) {
 	// 必须要传入fset，用来保存Position信息
@@ -242,8 +239,7 @@ func (p *parser) parseFile() *ast.File {
 	}
 }
 ```
-
-
+上面的`decl`，包括全局的变量声明，类型声明，函数声明等，具体就不展开了。
 
 ### 来个例子
 
