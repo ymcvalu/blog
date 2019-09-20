@@ -337,7 +337,19 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 	// 执行handler，这个handler是通过.proto文件生成的，该方法内会去调用server的对应的方法，该方法返回对应的resp
     // 这里第三个参数是反序列化方法，第四个参数是创建server时指定的interceptor选项
 	reply, appErr := md.Handler(srv.server, ctx, df, s.opts.unaryInt)
+	// 如果返回的错误，这里的err可能是由我们的rpc方法返回的
 	if appErr != nil {
+		appStatus, ok := status.FromError(appErr)
+		if !ok {
+			// 如过没有实现 interface{GRPCStatus()*Status} 接口
+			appErr = status.Error(codes.Unknown, appErr.Error())
+			appStatus, _ = status.FromError(appErr)
+		}
+		// ...
+		// 写入错误信息到stream中
+		if e := t.WriteStatus(stream, appStatus); e != nil {
+			grpclog.Warningf("grpc: Server.processUnaryRPC failed to write status: %v", e)
+		}
 		// ...
 		return appErr
 	}
