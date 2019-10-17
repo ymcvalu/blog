@@ -69,7 +69,7 @@ func deferproc(siz int32, fn *funcval) { // arguments of fn follow fn
 	sp := getcallersp(unsafe.Pointer(&siz))
     //fn的参数紧跟在fn之后,因此通过简单的指针运算可以获取fn的参数起始地址
 	argp := uintptr(unsafe.Pointer(&fn)) + unsafe.Sizeof(fn)
-    //获取defer语句的pc
+    // 获取当前函数的调用者的PC
 	callerpc := getcallerpc()
 	//获取一个_defer
 	d := newdefer(siz)
@@ -78,6 +78,7 @@ func deferproc(siz int32, fn *funcval) { // arguments of fn follow fn
 	}
 	d.fn = fn
 	d.pc = callerpc
+    // 保存当前的SP
 	d.sp = sp
 	switch siz {
 	case 0:
@@ -146,7 +147,8 @@ func deferreturn(arg0 uintptr) { //这边的arg0只是为了获取当前的sp
 	if d == nil {
 		return
 	}
-    //确保sp前后一致
+    // 当前goroutine的所有的_defer通过链表连接
+    // 这里通过比较SP，确保只执行当前函数的_defer
 	sp := getcallersp(unsafe.Pointer(&arg0))
 	if d.sp != sp {
 		return
@@ -203,6 +205,142 @@ go中还有一个比较独特的地方，如果程序发生异常，会保证先
 如果有延时函数执行了recover，则在延时函数返回后，直接跳转到_defer.pc，而不会执行后续的延时函数
 ```
 
+```go
+// 内置函数panic的实现
+func gopanic(e interface{}) {
+	gp := getg()  // 当前panic的g
+	
+    // 在系统栈panic
+    if gp.m.curg != gp {
+		print("panic: ")
+		printany(e)
+		print("\n")
+		throw("panic on system stack") // throw是不可恢复的，直接终止进程
+	}
+    
+    // 在内存分配过程中panic
+	if gp.m.mallocing != 0 {
+		print("panic: ")
+		printany(e)
+		print("\n")
+		throw("panic during malloc")
+	}
+    
+	if gp.m.preemptoff != "" {
+		print("panic: ")
+		printany(e)
+		print("\n")
+		print("preempt off reason: ")
+		print(gp.m.preemptoff)
+		print("\n")
+		throw("panic during preemptoff")
+	}
+    
+	if gp.m.locks != 0 {
+		print("panic: ")
+		printany(e)
+		print("\n")
+		throw("panic holding locks")
+	}
+
+	var p _panic
+	p.arg = e
+	p.link = gp._panic
+    // 在defer中可以通过recover获取到该_panic
+	gp._panic = (*_panic)(noescape(unsafe.Pointer(&p)))
+    // 统计
+	atomic.Xadd(&runningPanicDefers, 1)
+
+    // 依次执行当前goroutine的_defer
+	for {
+		d := gp._defer
+		if d == nil {
+			break
+		}
+
+		// If defer was started by earlier panic or Goexit (and, since we're back here, that triggered a new panic),
+		// take defer off list. The earlier panic or Goexit will not continue running.
+        // defer已经开始执行了，执行defer的时候又触发了panic
+		if d.started {
+            // 如果存在早期的panic
+			if d._panic != nil {
+                // 终止原来的panic
+				d._panic.aborted = true
+			}
+			d._panic = nil
+			d.fn = nil
+			gp._defer = d.link
+			freedefer(d)
+            // 继续下一个defer
+			continue
+		}
+
+		// Mark defer as started, but keep on list, so that traceback
+		// can find and update the defer's argument frame if stack growth
+		// or a garbage collection happens before reflectcall starts executing d.fn.
+		// 标记开始执行
+        d.started = true
+
+		// Record the panic that is running the defer.
+		// If there is a new panic during the deferred call, that panic
+		// will find d in the list and will mark d._panic (this panic) aborted.
+		// 设置defer
+        d._panic = (*_panic)(noescape(unsafe.Pointer(&p)))
+
+		p.argp = unsafe.Pointer(getargp(0))
+        // 调用defer延时的函数
+		reflectcall(nil, unsafe.Pointer(d.fn), deferArgs(d), uint32(d.siz), uint32(d.siz))
+		p.argp = nil
+
+		// reflectcall did not panic. Remove d.
+		if gp._defer != d {
+			throw("bad defer entry in panic")
+		}
+		d._panic = nil
+		d.fn = nil
+		gp._defer = d.link
+
+		// trigger shrinkage to test stack copy. See stack_test.go:TestStackPanic
+		//GC()
+
+		pc := d.pc
+		sp := unsafe.Pointer(d.sp) // must be pointer so it gets adjusted during stack copy
+		freedefer(d)
+        
+        // 如果在defer中recover了
+		if p.recovered {
+			atomic.Xadd(&runningPanicDefers, -1)
+
+			gp._panic = p.link
+			// Aborted panics are marked but remain on the g.panic list.
+			// Remove them from the list.
+            // 移除已经aborted的panic
+			for gp._panic != nil && gp._panic.aborted {
+				gp._panic = gp._panic.link
+			}
+			if gp._panic == nil { // must be done with signal
+				gp.sig = 0
+			}
+			// Pass information about recovering frame to recovery.
+			gp.sigcode0 = uintptr(sp)
+			gp.sigcode1 = pc
+			// 调用recovery，恢复执行
+            mcall(recovery)
+			throw("recovery failed") // mcall should not return
+		}
+	}
+
+	// ran out of deferred calls - old-school panic now
+	// Because it is unsafe to call arbitrary user code after freezing
+	// the world, we call preprintpanics to invoke all necessary Error
+	// and String methods to prepare the panic strings before startpanic.
+	preprintpanics(gp._panic)
+
+	fatalpanic(gp._panic) // should not return
+	*(*int)(nil) = 0      // not reached
+}
+```
+
 
 
 最后，`defer`函数虽然方便，但是需要有额外的运行开销，在使用时需要进行取舍，尤其是具有多个参数的时候，会发生多次内存拷贝：
@@ -213,7 +351,7 @@ runtime.deferproc执行过程中，拷贝_defer之后
 runtime.deferreturn执行时，移动到栈中
 ```
 
-
+update：go1.13对defer进行了优化，如果`_defer`没有发生逃逸，则将其分配在栈上，可以提高30%的性能。
 
 
 
