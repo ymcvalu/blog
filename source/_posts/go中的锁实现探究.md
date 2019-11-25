@@ -49,7 +49,7 @@ type Mutex struct {
 }
 ```
 
-可以看到，`Mutex`只包含两个字段，其中`state`用于记录锁的状态，第一位表示锁是否被占用，第二位表示当前是否有未阻塞的协程在抢占锁，第三位表示是否处于饥饿模式，从第四位到第32位则用于记录当前阻塞在等待锁的协程数量；而`sema`是用于在多个协程之间进行同步的信号量，这个后面再说。
+可以看到，`Mutex`只包含两个字段，其中`state`用于记录锁的状态，第一位表示锁是否被占用，第二位用于通知`unlock`方法不要唤醒一个`waiter`参与锁的抢夺，第三位表示是当前锁否处于饥饿模式，从第四位到第32位则用于记录当前阻塞在等待锁的协程数量；而`sema`是用于在多个协程之间进行同步的信号量，这个后面再说。
 
 ##### 抢占锁
 
@@ -74,7 +74,7 @@ func (m *Mutex) Lock() {
 	var waitStartTime int64
 	// 是否处于饥饿模式
     starving := false
-    // 是否有运行中的抢占锁的协程
+    // 是否设置了state的mutexWoken状态位
 	awoke := false
     // 记录自旋次数
 	iter := 0
@@ -95,20 +95,26 @@ func (m *Mutex) Lock() {
 			old = m.state
 			continue 
 		}
+        
+        // 参与锁的抢夺
+        
 		new := old
 		// 如果不处于饥饿模式，设置状态位尝试获取锁
         if old&mutexStarving == 0 {
 			new |= mutexLocked
 		}
-        // 如果已经锁住或者处于饥饿模式，阻塞的协程数量加1
+        
+        // 如果已经锁住或者处于饥饿模式，需要进入等待队列，waiter数量加1
 		if old&(mutexLocked|mutexStarving) != 0 {
 			new += 1 << mutexWaiterShift
 		}
+        
 		// 如果需要进入饥饿状态，则设置饥饿标志位
 		if starving && old&mutexLocked != 0 {
 			new |= mutexStarving
 		}
-        // 清除awoke状态位
+        
+        // state的mutexWoken状态位
 		if awoke {
 			// The goroutine has been woken from sleep,
 			// so we need to reset the flag in either case.
@@ -120,20 +126,23 @@ func (m *Mutex) Lock() {
         // cas更新锁状态
 		if atomic.CompareAndSwapInt32(&m.state, old, new) {
             // 更新成功，并且原来锁为unlock并且不属于饥饿模式，直接返回
-            // 这种情况是锁处于正常模式，新的协程与旧的协程竞争锁，并且竞争成功
+            // 这种情况是锁处于正常模式，新的协程与从等待中唤醒的协程竞争锁，并且竞争成功
 			if old&(mutexLocked|mutexStarving) == 0 {
 				break // locked the mutex with CAS
 			}
-			// 如果waitStartTime大于0，表示当协程原来阻塞等待锁，现在被唤醒了
+            
+			// 是否是从等待状态中唤醒的
 			queueLifo := waitStartTime != 0
             // 设置开始等待时间
 			if waitStartTime == 0 {
 				waitStartTime = runtime_nanotime()
 			}
+            
             // 当前协程抢占锁失败，阻塞等待，这里需要传入信号量sema和queueLifo
             // 信号量sema用来在多个协程之间同步
             // queueLifo如果为true，表示当前协程与新的协程竞争锁失败，加入队首，否则加入队尾
 			runtime_SemacquireMutex(&m.sema, queueLifo)
+            
             // 执行到这里表明协程被从等待队列中唤醒了
             // 如果等待时间大于1ms则进入饥饿模式
 			starving = starving || runtime_nanotime()-waitStartTime > starvationThresholdNs
@@ -258,10 +267,11 @@ func (m *Mutex) Unlock() {
 	if new&mutexStarving == 0 {
 		old := new
 		for {
-			// 如果没有阻塞等待的队列，或者当前有woken的锁等待者，直接返回
+			// 如果没有等待锁的协程，或者设置了mutexWoken标志位，直接返回
 			if old>>mutexWaiterShift == 0 || old&(mutexLocked|mutexWoken|mutexStarving) != 0 {
 				return
 			}
+            
 			// 唤醒一个等待的协程，参与锁竞争
 			new = (old - 1<<mutexWaiterShift) | mutexWoken
 			if atomic.CompareAndSwapInt32(&m.state, old, new) {
@@ -328,6 +338,10 @@ func semrelease1(addr *uint32, handoff bool) {
 	}
 }
 ```
+
+
+
+> 新版本的`Mutex`实现，将`Lock`和`Unlock`方法中的只保留了`fastpath`，而`slowpath`部分移到新的子过程中，用于内联优化。
 
 
 
@@ -463,4 +477,8 @@ func (rw *RWMutex) Unlock() {
 	}
 }
  ```
+
+
+
+
 
