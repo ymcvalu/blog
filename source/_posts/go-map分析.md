@@ -19,30 +19,32 @@ type hmap struct {
 	noverflow uint16 // 总的overflow的数量
 	hash0     uint32 // hash seed
 
-	buckets    unsafe.Pointer // bucket数组，长度为2^B，这里的bucket其实本质上是一个bmap链表
-	oldbuckets unsafe.Pointer // 如果发生扩容，旧的buckets就会保存到oldbuckets
+	buckets    unsafe.Pointer // bucket数组，长度为2^B，这里bucket实际是bmap
+	oldbuckets unsafe.Pointer // 如果发生扩容，旧的buckets就会保存到oldbuckets，在后续的操作中会慢慢迁移到新的buckets中
 	nevacuate  uintptr        // 扩容时需要从原来的buckets将数据迁移到新的buckets中，该字段表示小于该数值的buckets当前都已经迁移完成
 
 	extra *mapextra // 如果map中保存的key和value都没有包含指针，那么gc时就不需要对buckets里面的内容进行扫描，但是每个bucket本质上是一个链表，buckets头部保存的是每个bucket链表的头节点，这时候会将每个链表的后续节点保存到该字段内，从而gc时可以对这些后续节点进行扫描，防止被回收
 }
 ```
+**`map`的key和value，如果都没有包含指针，那么会对其进行优化，`gc`的时候就不需要去扫描每个键值对了**
 
 上面`extra`字段对应的`mapextra`类型：
 
 ```go
 type mapextra struct {
-	overflow    *[]*bmap // 这里保存bucket链表的后续节点，实际上bucket就是一个bmap
-	oldoverflow *[]*bmap // 这里保存oldbucket链表的后续节点，实际上bucket就是一个bmap
+	overflow    *[]*bmap // 对应buckets
+	oldoverflow *[]*bmap // 对应oldbuckets
 
 	// nextOverflow holds a pointer to a free overflow bucket.
 	nextOverflow *bmap // 分配bmap时，可能会预先分配一些，当需要时可以直接从这里获取
 }
 ```
 
-上面说的，每个`bucket`实际上是一个`bmap`链表，而`hmap`中的`buckets`是一个`bmap`链表数组，这是不是和开散列很像呢？和开散列不同的是，开散列中，链表中每个节点都只保存一个键值对，但是这里，**一个`bmap`中保存了8个键值对**，下面来看一下`bmap`的定义：
+上面说的，每个`bucket`实际上是一个`bmap`链表，而`hmap`中的`buckets`是一个`bmap`链表数组，这实际上就是[开散列](https://en.wikipedia.org/wiki/Hash_table#Open_addressing)。和普通的开散列不同的是，**一个`bmap`中保存了8个键值对**，下面来看一下`bmap`的定义：
 
 ```go
 // A bucket for a Go map.
+// bucket实际上是一个bmap
 type bmap struct {
 	// 这里bucketCnt是一个全局声明的常量，大小为8，也就是限制每个bmap中保存8个键值对
     // 当判断一个key是否在当前bmap中时，会先获取这个key的hash的高8位，然后在tophash中查找是否有匹配的索引，如果有再进一步比较key是否相同，如果当前bmap中没有找到，则到下一个bmap中查找
@@ -53,6 +55,9 @@ type bmap struct {
     // 8个键值对之后还有一个overflow指针，用来链接下一个bmap，正如上面说的，每个bucket实际上是一个bmap链表，这里通过overflow链接的这些bmap被称为`overflow bucket`
 }
 ```
+> 因为bmap链接下一个bmap的overflow指针在末尾，而不同类型的key和value的内存大小又不同，因此无法直接获取到下一个bmap的地址，前面说过，当key和value不包含指针的时候，gc时不需要扫描这些键值对；但是又需要扫描这些bmap，因此这种情况下会把这些bmap存到mapextra字段中的`overflow和oldoverflow中，这样gc时直接遍历这两个切片就好了。
+那为什么不把overflow放到bmap头部呢？个人觉得可能是为了让内存访问更友好吧，连续的内存访问肯定更加高效。
+
 
 如上面`bmap`所见，键值对并没有显示声明出来，而是需要在运行时根据指针运算来访问，这里来看一下一个全局声明的常量`dataOffset`，这个常量在后续会经常看到：
 
@@ -94,9 +99,8 @@ ith val: bptr + dataOffset + bucketCnt * ksize + i * vsize
 
 
 
-> 从上面可以看到，一个`bucket`实际上是一个`bmap`，而且`bmap`可以通过`overflow`指针来形成链表，这些通过`overflow`引用的`bmap`被称作`overflow bucket`
->
-> 个人认为把`bucket`当作一个`bmap`链表会比较好理解。
+> 从上面可以看到，一个`bucket`实际上是一个`bmap`，而且`bmap`可以通过`overflow`指针来形成链表，这些通过`overflow`引用的`bmap`被称作`overflow bucket`，而`buckets`中`bmap`的称为`bucket`。`bucket`实际上也可以认为是整条`bmap`链表，比如扩容时的`bucket`迁移，实际上就是迁移整条`bmap`链表。
+
 
 ### map创建
 
@@ -697,8 +701,8 @@ next:
 
 当写入时，如果当前`bucket`已经满了，则会触发扩容检查，如果当前不处于扩容状态并且满足：
 
-- 当前键值对格式已经达到 `0.65*2^B`
-- 当前`bmap`的数量达到`1<<(B&15)`，这里的`B`如果大于15，按照15计算
+- 当前键值对个数已经达到 `0.65*2^B`
+- 当前`overflow bucket`数量达到`1<<(B&15)`，这里的`B`如果大于15，按照15计算
 
 下面看一下开始扩容的逻辑：
 
@@ -708,13 +712,20 @@ func hashGrow(t *maptype, h *hmap) {
 	// Otherwise, there are too many overflow buckets,
 	// so keep the same number of buckets and "grow" laterally.
 	bigger := uint8(1)
-    // 如果键值对数量没有达到阈值，则说明是overflow bucket过多触发的
+    // 如果键值对数量没有达到阈值，则说明是overflow bucket数量过多触发的
 	if !overLoadFactor(h.count+1, h.B) {
-		bigger = 0
+		bigger = 0 // 这里将bigger设置成了0
+		// 设置标志位，用于后续区分是哪种情况触发的扩容
+		// 如果是overflow bucket数量过多触发的，实际上并不会增加bucket的数量
+		// 因此称作sameSizeGrow
 		h.flags |= sameSizeGrow
 	}
+
+	// 保存原来的buckets到oldbuckets
 	oldbuckets := h.buckets
-    // 分配新的buckets
+	// 分配新的buckets
+	// 如果是键值对达到阈值触发的扩容，bucket数量为原来的2倍，也就是扩展buckets数组
+	// 否则维持原来的数量
 	newbuckets, nextOverflow := makeBucketArray(t, h.B+bigger, nil)
 	// 设置更新迭代标志位
 	flags := h.flags &^ (iterator | oldIterator)
@@ -754,10 +765,10 @@ func hashGrow(t *maptype, h *hmap) {
 
 ```go
 func growWork(t *maptype, h *hmap, bucket uintptr) {
-	// 迁移将要使用的bucket对应的oldbucket的数据
+	// 迁移正在使用的bucket对应的oldbucket的数据
 	evacuate(t, h, bucket&h.oldbucketmask())
 
-	// 继续对h.nevacuate对应的bucket进行迁移
+	// 继续对h.nevacuate对应的bucket进行迁移，让迁移尽快完成
 	if h.growing() {
 		evacuate(t, h, h.nevacuate)
 	}

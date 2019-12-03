@@ -12,7 +12,7 @@ tags:
 ```go
 type iface struct {
 	tab  *itab
-	data unsafe.Pointer // 这里的data不是直接指向接口背后的实际值，而是指向实际值的拷贝
+	data unsafe.Pointer 
 }
 
 // layout of Itab known to compilers
@@ -21,16 +21,16 @@ type iface struct {
 // ../cmd/compile/internal/gc/reflect.go:/^func.dumptypestructs.
 type itab struct {
 	inter *interfacetype // 接口类型
-	_type *_type // 实际类型
-	hash  uint32 // copy of _type.hash. Used for type switches.
-	_     [4]byte // 4字节填充，与上面的4字节hash凑成8字节，与n内存对齐相关
+	_type *_type         // 实际类型
+	hash  uint32         // copy of _type.hash. Used for type switches.
+	_     [4]byte        // 4字节填充，与上面的4字节hash凑成8字节，与n内存对齐相关
     // itab末尾是实现方法的引用，如果多余1个，则其余方法引用紧跟itab内存之后分配
 	fun   [1]uintptr // variable sized. fun[0]==0 means _type does not implement inter.
 }
 
 type interfacetype struct {
 	typ     _type // 接口类型信息
-	pkgpath name	
+	pkgpath name	 
 	mhdr    []imethod // 接口声明的方法
 }
 
@@ -243,9 +243,46 @@ func convT2I(tab *itab, elem unsafe.Pointer) (i iface) {
 }
 ```
 
-比如我们把一个指针值赋给一个接口变量，调用`convT2I`方法时，`elem`就是指针的指针了。**这里我们也可以看到，`iface.data`不是直接指向接口背后的实际值，而是指向其拷贝，因为这个原因，也就很好理解为什么方法接收者是指针的话，值类型就不会实现对应的接口类型了。**
+当我们把一个**非指针值**赋给一个接口类型的变量时，就会调用该方法。**这里我们也可以看到，`iface.data`不是直接指向接口背后的实际值，而是指向其拷贝，因为这个原因，也就很好理解为什么方法接收者是指针的话，值类型就不会实现对应的接口类型了，因为访问的根本不是同一个变量。**
 
+而当把一个指针值赋给一个接口类型的变量呢？编译器会直接生成代码，这个时候`iface.data`就是该指针值，我们可以写个小`demo`验证一下：
+```go
+import (
+	"fmt"
+	"unsafe"
+)
 
+type eface struct {
+	typ  uintptr
+	data unsafe.Pointer
+}
+
+func main() {
+	n := struct {
+		T int
+	}{}
+
+	pi := interface{}(&n)
+	vi := interface{}(n)
+
+	_pi := *(*eface)(unsafe.Pointer(&pi))
+	_vi := *(*eface)(unsafe.Pointer(&vi))
+
+	fmt.Printf("%p %p %p\n", &n, _pi.data, _vi.data) // 0xc000060090 0xc000060090 0x597500
+}
+```
+代码中我们使用空接口，实际上空接口对应的定义`eface`和`iface`的差别只有第一个字段，因为它没有方法表，直接存储的就是值的类型。我们可以看到，接口值`vi`实际存储的是变量`n`的地址，而`vi.data`此时存的就是`n`的地址。
+看一下对应的汇编片段：
+```
+ LEAQ	type.struct { T int }(SB), AX
+ MOVQ	AX, (SP)
+ CALL	runtime.newobject(SB)  // 代码里面用的unsafe.Pointer，因为传到fmt.Printf里面，逃逸分析认为该变量逃逸了
+ MOVQ	8(SP), AX              // newobject返回的地址
+ MOVQ	AX, ""..autotmp_41+80(SP) // 保存到栈上的临时变量中
+ LEAQ	type.*struct { T int }(SB), CX  // *struct{T int}的 _type
+ MOVQ	CX, "".pi+88(SP)                // 设置pi的 _type
+ MOVQ	AX, "".pi+96(SP)                //  设置pi的data，这里data就是n的地址
+```
 
 ### 接口类型转换
 
@@ -269,7 +306,7 @@ func convI2I(inter *interfacetype, i iface) (r iface) {
 
 **将接口值A强制转换成接口B时，需要满足：接口A的方法集包含或者等于接口B的方法集**
 
-接口值之间的类型转换，不会考虑实际类型的方法集，而是简单的对接口的方法集进行判断
+接口值之间的类型转换，不会考虑实际类型的方法集，而是简单的对接口的方法集进行判断，这个在编译时就可以进行检查
 
 ```go
 var r io.ReadCloser = XXX{}
