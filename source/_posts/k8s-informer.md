@@ -5,8 +5,6 @@ tags:
     - k8s - informer
 ---
 
-# kubernetes之Informer
-
  ![](/img/kubernetes-high-level-component-archtecture.jpg)
 
 我们与`k8s`集群的交互，主要是通过向`api-server`提交资源对象。
