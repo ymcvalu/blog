@@ -1,5 +1,5 @@
 ---
-title: k8s_informer
+title: k8s informer源码分析
 date: 2019-12-28 22:50:56
 tags:
     - k8s - informer
