@@ -50,3 +50,41 @@ s1 := make([]User,0,10)
 因此，**推荐的是使用`[]User`类型**。这样只会分配一次内存。而如果使用`[]*User`类型，需要分配n+1次，底层数组1次加上n次切片元素。
 
 然而，事与愿违的是，我们一般会使用第三方`orm`框架，这些框架中，会循环的通过反射去`new`对象，然后`append`进去。
+
+
+那么切片什么时候等于`nil`呢？
+
+`slice`本身本质上是一个结构体，只有当其三个字段都是零值的时候，才等于`nil`。
+
+在代码中，我们判断一个`slice`是否有内容，并不需要关心其是否是`nil`,只要使用`len(s) == 0`就可以了。
+
+但是当`json`序列化时，如果切片为`nil`时，对应序列化为`null`，而如果是非`nil`的空切片，则对应为`[]`。
+
+
+当我们声明一个变量时：
+```go
+ var s1 []int
+```
+
+因为初始化为零值，则对应的切片结构体三个字段都是零值，因此`s1==nil`
+
+而当我们这样写时：
+```go
+ var s1 = []int{}
+ var s2 = make([]int, 0, 0)
+```
+这两个切片都是非`nil`的空切片。而又因为切片的`cap`是零，`go`会将其`data`字段初始化为：
+```go
+ // base address for all 0-byte allocations
+ var zerobase uintptr
+```
+
+`zerobase`是声明在`runtime`包下面的一个全局变量，当需要分配一块零字节的内存时，都会返回该变量的地址：
+```go
+func mallocgc(size uintptr, typ *_typ, needzero bool) unsafe.Pointer {
+	if size == 0 {
+		return unsafe.Pointer(&zerobase)
+	}
+	...
+}
+```

@@ -1,5 +1,5 @@
 ---
-title: paxos
+title: paxos一致性协议
 date: 2019-12-28 23:31:51
 tags:
     - paxos - consensus algorithm
