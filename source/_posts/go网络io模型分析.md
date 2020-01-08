@@ -215,24 +215,25 @@ type netFD struct {
 
 // FD is a file descriptor. The net and os packages use this type as a
 // field of a larger type representing a network connection or OS file.
+// 对应上面的poll.FD
 type FD struct {
 	// Lock sysfd and serialize access to Read and Write methods.
-	fdmu fdMutex
+	fdmu fdMutex // 执行read/write时的互斥锁
 
 	// System file descriptor. Immutable until Close.
-	Sysfd int
+	Sysfd int // open系统调用返回的文件描述符fd
 
 	// I/O poller.
-	pd pollDesc
+	pd pollDesc 
 
 	// Writev cache.
-	iovecs *[]syscall.Iovec
+	iovecs *[]syscall.Iovec 
 
 	// Semaphore signaled when file is closed.
 	csema uint32
 
 	// Non-zero if this file has been set to blocking mode.
-	isBlocking uint32
+	isBlocking uint32 
 
 	// Whether this is a streaming descriptor, as opposed to a
 	// packet-based descriptor like a UDP socket. Immutable.
@@ -264,11 +265,13 @@ func (fd *FD) Init(net string, pollable bool) error {
 	if net == "file" {
 		fd.isFile = true
 	}
+ 
 	if !pollable {
 		fd.isBlocking = 1
 		return nil
 	}
-    // 这里又有个init，这里的pd是pollDesc类型
+	// 这里又有个init，这里的pd是pollDesc类型
+	// 只有pollable才会调用该方法
 	err := fd.pd.init(fd)
 	if err != nil {
 		// If we could not initialize the runtime poller,
@@ -294,8 +297,11 @@ var serverInit sync.Once
 
 func (pd *pollDesc) init(fd *FD) error {
 	// 保证runtime_pollServerInit只会执行一次
+	// 从命名很容易看出来该方法在runtime包中实现
     serverInit.Do(runtime_pollServerInit)
-    // 执行runtime_pollOpen
+	// 执行runtime_pollOpen
+	// 只有文件是pollable的时候，才会走到这里
+	// 该方法实际上是将fd加入到epoll中，该方法在runtime包中实现
 	ctx, errno := runtime_pollOpen(uintptr(fd.Sysfd))
 	if errno != 0 {
 		if ctx != 0 {
@@ -304,7 +310,7 @@ func (pd *pollDesc) init(fd *FD) error {
 		}
 		return syscall.Errno(errno)
 	}
-    // 把返回值保存到runtimeCtx中
+    // 保存pollOpen返回的上下文
 	pd.runtimeCtx = ctx
 	return nil
 }
@@ -371,7 +377,8 @@ func poll_runtime_pollOpen(fd uintptr) (*pollDesc, int) {
 
 func netpollopen(fd uintptr, pd *pollDesc) int32 {
 	var ev epollevent
-    // 设置需要通知的实际类型，这里设置了边缘触发模式，关于epoll的边缘触发和水平触发模式可以网上有一堆的资料
+	// 设置需要通知的实际类型，这里设置了边缘触发模式，关于epoll的边缘触发和水平触发模式可以网上有一堆的资料
+	// 边缘触发和水平触发的本质区别，就是水平触发的话，当事件从epoll的readyList拷贝到用户空间时，会重新加入到readyList，这样下次执行epoll_wait的话，readyList还会有该事件存在（epoll_wait会重新执行file->operations中的poll方法确定是否有事件可以消费）
 	ev.events = _EPOLLIN | _EPOLLOUT | _EPOLLRDHUP | _EPOLLET
     // 可以看到，这里把pollDesc的地址存到了ev.Data中
 	*(**pollDesc)(unsafe.Pointer(&ev.data)) = pd
@@ -386,6 +393,36 @@ func netpollopen(fd uintptr, pd *pollDesc) int32 {
 2. 如果没有初始化过`runtime`包的`epoll`，则执行初始化，创建一个`epoll`
 3. 以边缘触发模式将`socket`添加到`epoll`中
 4. 返回封装后的`net.Listener`
+
+### runtime包中的一些注释
+```go
+// Integrated network poller (platform-independent part).
+// A particular implementation (epoll/kqueue) must define the following functions:
+// func netpollinit()			// to initialize the poller
+// func netpollopen(fd uintptr, pd *pollDesc) int32	// to arm edge-triggered notifications
+// and associate fd with pd.
+// An implementation must call the following function to denote that the pd is ready.
+// func netpollready(gpp **g, pd *pollDesc, mode int32)
+
+// pollDesc contains 2 binary semaphores, rg and wg, to park reader and writer
+// goroutines respectively. The semaphore can be in the following states:
+// pdReady - io readiness notification is pending;
+//           a goroutine consumes the notification by changing the state to nil.
+// pdWait - a goroutine prepares to park on the semaphore, but not yet parked;
+//          the goroutine commits to park by changing the state to G pointer,
+//          or, alternatively, concurrent io notification changes the state to READY,
+//          or, alternatively, concurrent timeout/close changes the state to nil.
+// G pointer - the goroutine is blocked on the semaphore;
+//             io notification or timeout/close changes the state to READY or nil respectively
+//             and unparks the goroutine.
+// nil - nothing of the above.
+```
+`pollDesc`的`rg`和`wg`字段，可能的取值情况：
+- `pdReady`：`rg`表示当前有可读事件，`wg`表示可写
+- `pdWait`：表示即将进入等待
+- `G`的指针：需要先进入`pdWait`，然后调用`gopark`，设置等待事件类型，如果是等待读，则设置`rg`，等待写则设置`wg`为当前`G`的指针，然后挂起；当事件到达，`runtime`会将对应的`G`唤醒
+- `0`：其他情况
+
 
 ### Accept又是如何执行的呢
 
