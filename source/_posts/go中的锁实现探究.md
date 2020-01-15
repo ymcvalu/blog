@@ -143,24 +143,31 @@ func (m *Mutex) Lock() {
             // queueLifo如果为true，表示当前协程与新的协程竞争锁失败，加入队首，否则加入队尾
 			runtime_SemacquireMutex(&m.sema, queueLifo)
             
-            // 执行到这里表明协程被从等待队列中唤醒了
-            // 如果等待时间大于1ms则进入饥饿模式
+			// 执行到这里表明协程被从等待队列中唤醒了
+			
+			// 如果等待时间大于1ms则进入饥饿模式
+			// 如果当前协程等待锁少于1ms，则会退出饥饿模式
 			starving = starving || runtime_nanotime()-waitStartTime > starvationThresholdNs
 			old = m.state
-            // 当前锁处于饥饿模式，表明没有其他协程会与当前协程竞争锁
+
+			// 当前处于饥饿模式
+			// 饥饿模式下，不允许新的协程参与锁的争夺，而是直接加入到队尾
+			// 因此从饥饿模式唤醒的协程，可以直接获取锁
 			if old&mutexStarving != 0 {
-				// 检查状态位
+				// 检查锁的状态
 				if old&(mutexLocked|mutexWoken) != 0 || old>>mutexWaiterShift == 0 {
 					throw("sync: inconsistent mutex state")
 				}
-                // 更新状态位，饥饿模式，只有当前协程能够抢占锁
-                // 阻塞等待锁的协程数量需要减1
+
+                // 更新状态位，饥饿模式，只有当前协程能够争夺锁
+                // 等待队列需要减1
 				delta := int32(mutexLocked - 1<<mutexWaiterShift)
                 // 如果不需要进入饥饿模式，或者当前等待队列为空，则清空饥饿模式
 				if !starving || old>>mutexWaiterShift == 1 {
 					delta -= mutexStarving
 				}
-                // 这里使用原子Add而不是CAS操作，因为可能在这个时刻有新的协程因为等待锁而阻塞，这时候如果使用CAS会失败
+				// 这里使用原子Add而不是CAS操作
+				// 因为这时候可能有新的协程进入阻塞模式，会更新锁的状态，如果使用CAS会失败
 				atomic.AddInt32(&m.state, delta)
 				break // 返回
 			}
