@@ -20,13 +20,13 @@ tags:
 
 各个表和包含的链关系如下：
 
-| table      | chain                                                        | desc                                                        |
-| ---------- | ------------------------------------------------------------ | ----------------------------------------------------------- |
-| `raw`      | `PREROUTING`、`OUTPUT`                                       | 关闭nat表上使用的连接追踪机制；内核模块：`iptable_raw`      |
-| `filter`   | `INPUT`、`OUTPUT`、`FORWARD`                                 | 负责过滤功能，防火墙；内核模块：`iptable_filter`            |
-| `nat`      | `PREROUTING`、 `POSTROUTING`、 `OUTPUT`、 `INPUT(部分支持)`  | 网络地址转换；内核模块：`iptable_nat`                       |
+| table      | chain                                                         | desc                                                        |
+| ---------- | ------------------------------------------------------------- | ----------------------------------------------------------- |
+| `raw`      | `PREROUTING`、`OUTPUT`                                        | 关闭nat表上使用的连接追踪机制；内核模块：`iptable_raw`      |
+| `filter`   | `INPUT`、`OUTPUT`、`FORWARD`                                  | 负责过滤功能，防火墙；内核模块：`iptable_filter`            |
+| `nat`      | `PREROUTING`、 `POSTROUTING`、 `OUTPUT`、 `INPUT(部分支持)`   | 网络地址转换；内核模块：`iptable_nat`                       |
 | `mangle`   | `PREROUTING`、 `INPUT`、 `FORWARD`、 `OUTPUT `、`POSTROUTING` | 拆解、修改、重封装报文；内核模块：`iptable_mangle`          |
-| `security` |                                                              | 用于强制[访问控制网络](http://lwn.net/Articles/267140/)规则 |
+| `security` |                                                               | 用于强制[访问控制网络](http://lwn.net/Articles/267140/)规则 |
 
 默认情况下，任何链中都没有规则。可以向链中添加自己想用的规则。链的默认规则通常设置为 `ACCEPT`，如果想确保任何包都不能通过规则集，那么可以重置为 `DROP`。默认的规则总是在一条链的最后生效，所以在默认规则生效前数据包需要通过所有存在的规则。用户可以加入自己定义的链，从而使规则集更方便管理，自定义链需要被内置的链引用才能生效。每个链下面可以设置一组规则，执行链时就是执行这组规则。
 
@@ -45,6 +45,8 @@ tags:
 ![图2](/img/iptable_subtraverse.jpg)
 
 
+接下来看一下数据包在内核的 netfilter 的流动：
+![](/img/Netfilter-packet-flow.svg)
 
 ### Command
 
