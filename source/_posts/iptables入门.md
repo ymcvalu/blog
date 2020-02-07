@@ -8,6 +8,12 @@ tags:
 
 # iptables
 
+Netfilter是Linux 2.4.x引入的一个子系统，它作为一个通用的、抽象的框架，提供一整套的hook函数的管理机制，使得诸如数据包过滤、网络地址转换(NAT)和基于协议类型的连接跟踪成为了可能。
+
+netfilter的架构就是在整个网络流程的若干位置放置了一些检测点（HOOK），用户可以在每个检测点上注册一些处理函数进行处理。
+
+而iptables其实是一个命令行工具，位于用户空间，我们可以用这个工具来对netfilter进行配置。
+
 ### Doc
 
 - [iptables tutorial](<https://www.frozentux.net/iptables-tutorial/iptables-tutorial.html>)
@@ -30,15 +36,26 @@ tags:
 
 默认情况下，任何链中都没有规则。可以向链中添加自己想用的规则。链的默认规则通常设置为 `ACCEPT`，如果想确保任何包都不能通过规则集，那么可以重置为 `DROP`。默认的规则总是在一条链的最后生效，所以在默认规则生效前数据包需要通过所有存在的规则。用户可以加入自己定义的链，从而使规则集更方便管理，自定义链需要被内置的链引用才能生效。每个链下面可以设置一组规则，执行链时就是执行这组规则。
 
-
-
 ### Traversing Chains
 
+![图1](/img/iptables1.jpg)
+
+上图描述了网络数据包在netfilter中的处理过程。
+
+比如看上面的`PREROUTING`，可以看到数据包需要先后经过多个表的`PREROUTING`链
+
+我们还可以看到在经过`mangle`表的`PREROUTING`之前会先由`connection tracking`，也就是会跟踪连接，比如执行透明代理的时候，请求的目标端口被修改了，这时候应用层的代理服务需要知道原始请求的端口，因为由连接跟踪模块的存在，这时候可以通过系统调用`getsockopt`来获取。
+
+而数据包首先会经过`raw`表的`PREROUTING`链，才会交由连接跟踪模块处理，它的优先级最高，用户可以通过`RAW`表添加`NOTRACK`目标来禁用连接跟踪：
+```sh
+$ sudo iptables -t raw -A PREROUTING -p tcp -j NOTRACK
+```
+当使用`NOTRACK`之后，后续的连接跟踪模块以及其他表的`PREROUTING`链将会被跳过。
 
 
-![图1](/img/iptables_traverse.jpg)
+数据包通过路径上的每一条链时，链中的每一条规则按顺序匹配；无论何时匹配了一条规则，相应的` target` 动作将会执行。
 
-上图描述链了在任何接口上收到的网络数据包是按照怎样的顺序穿过表的交通管制链。第一个路由策略包括决定数据包的目的地是本地主机（这种情况下，数据包穿过 `INPUT` 链），还是其他主机（数据包穿过 `FORWARD` 链）；中间的路由策略包括决定给传出的数据包使用那个源地址、分配哪个接口；最后一个路由策略存在是因为先前的` mangle` 与 `nat` 链可能会改变数据包的路由信息。数据包通过路径上的每一条链时，链中的每一条规则按顺序匹配；无论何时匹配了一条规则，相应的` target` 动作将会执行。内置的链有默认的策略，但是用户自定义的链没有默认的策略。在` jump` 到的自定义链中，若每一条规则都不能提供完全匹配，那么数据包像下图描述的一样返回到调用链。在任何时候，若 `DROP` 的规则实现完全匹配，那么被匹配的数据包会被丢弃，不会进行进一步处理。如果一个数据包在链中被 `ACCEPT`，那么这个包就会被`ACCEPT`，不会再遍历后面的规则。
+除了内置的规则链之外，用户还可以定义自己的规则链。内置的链有默认的策略，但是用户自定义的链没有默认的策略。在`jump` 到的自定义链中，若每一条规则都不能提供完全匹配，那么数据包像下图描述的一样返回到调用链，也可以在中途使用`RETURN`返回到调用链；在任何时候，若 `DROP` 的规则实现完全匹配，那么被匹配的数据包会被丢弃，不会进行进一步处理。如果一个数据包在链中被 `ACCEPT`，那么这个包就会被`ACCEPT`，不会再遍历后面的规则。
 
 然而，要注意的是，数据包还会以正常的方式继续遍历其他表中的其他链。
 
@@ -79,7 +96,10 @@ $ iptables -t 表名 <-A/I/D/R> 规则链名 [规则号] <-i/o 网卡名> -p 协
   ```sh
   $ iptables -t filter -D INPUT 2 #删除INPUT链第二条规则
   ```
-
+- `-L`：查看规则链
+  ```sh
+  $ iptables -t nat -L PREROUTING # 查看nat表的PREROUTING链
+  ```
 ###### 链管理命令
 
 - `-P` or `--policy`：改变指定链的默认策略，只有内置的链才有默认策略，自定义链没有默认策略
@@ -170,3 +190,102 @@ $ iptables -t 表名 <-A/I/D/R> 规则链名 [规则号] <-i/o 网卡名> -p 协
 `DNAT`用于将内网机器的端口映射到外网。当网关接收到数据包时，通过DNAT将目标ip和端口替换成内网机器的ip和端口，然后进行转发。
 
 在容器网络中，容器的端口映射就是使用`DNAT`实现的。通过将容器的端口映射到主机端口上，当由数据包发送到该主机端口时，`netfilter`会将其替换成容器的ip和端口。
+
+
+### 使用 REDIRECT 实现透明代理
+在`service mesh`中，使用`sidecar`模式，每个应用容器都会挂载一个`proxy`容器，所有进出容器的流量都需要先经过`proxy`。
+
+在`isito`中，`proxy`容器内运行的实际上是一个`envoy`进程，在`pod`启动时，会先执行`init-container`，设置`pod`中的`iptables`规则，将所有的进出流量通过`REDIRECT`重定向到`envoy`监听的`15001`端口。
+
+而这就有个问题，`REDIRECT`会修改原数据包的头部字段，而在`envoy`中执行代理转发的时候，我们需要知道原来请求的目标地址。
+
+举个例子，比如我们的应用容器监听了`80`端口和`5555`端口，现在两个端口的请求都转发到`15001`了，那么`envoy`如何区分请求的是哪个端口呢？
+
+这就要用到前面说过的连接跟踪了。`netfilter`会跟踪连接信息，包括原始目标地址，而我们可以通过`getsockopt`系统调用来获取原始的目标地址。
+
+下面是一个`demo`：
+```go
+package main
+
+import (
+	"encoding/binary"
+	"log"
+	"net"
+	"syscall"
+	"unsafe"
+)
+
+func main() {
+	l, err := net.Listen("tcp", ":5555")
+	if err != nil {
+		panic(err)
+	}
+	defer l.Close()
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+		go func() {
+			defer conn.Close()
+			sysc, _ := conn.(*net.TCPConn).SyscallConn()
+			sysc.Control(func(fd uintptr) {
+				// 实际上填充的内容是linux中定义的c结构体：
+ 				//struct sockaddr_in {
+				// 	sa_family_t    sin_family; // addr family, 2 byte
+				//	in_port_t      sin_port;   // port in network byte order, 2 byte
+				//  struct in_addr sin_addr;   // addr in network byte order
+				//};
+				id_addr := [16]byte{}
+				_len := uint32(len(id_addr))
+
+				errno := getsockopt(int(fd), syscall.SOL_IP, SO_ORIGINAL_DST, unsafe.Pointer(&id_addr), &_len)
+				if errno != 0 {
+					log.Println("failed to get original addr")
+					return
+				}
+
+				ip := net.IP(id_addr[4:8])
+				// 返回的是大端序
+				port := int(binary.BigEndian.Uint16(id_addr[2:4]))
+				log.Printf("目标地址是：%s:%d", ip.String(), port)
+			})
+
+		}()
+	}
+}
+
+const SO_ORIGINAL_DST = 80
+
+func getsockopt(s int, level int, name int, val unsafe.Pointer, vallen *uint32) syscall.Errno {
+	_, _, e1 := syscall.Syscall6(syscall.SYS_GETSOCKOPT, uintptr(s), uintptr(level), uintptr(name), uintptr(val), uintptr(unsafe.Pointer(vallen)), 0)
+	return e1
+}
+```
+
+在上面的例子中，我们打开一个socket，监听系统的5555端口，然后设置系统的`iptables`：
+```sh
+$ sudo iptables -t nat -I PREROUTING 1 -p tcp --dport 5555 -j ACCEPT
+$ sudo iptables -t nat -I PREROUTING 2 -p tcp --j REDIRECT --to-port 5555
+```
+然后运行上面的demo，并使用`telnet`测试连接：
+```sh
+$ telnet 192.168.50.10 5555
+$ telnet 192.168.50.10 5556
+$ telnet 192.168.50.10 5557
+```
+
+可以看到服务输出：
+```sh
+$ go run main.go                                        
+2020/02/07 08:18:26 目标地址是：192.168.50.10:5555
+2020/02/07 08:18:28 目标地址是：192.168.50.10:5556
+2020/02/07 08:18:30 目标地址是：192.168.50.10:5557
+```
+
+我们成功拿到了请求的原始目标地址
+
+### 参考
+- https://github.com/owenliang/go-orig-dst/blob/master/main.go
+- https://www.servicemesher.com/istio-handbook/concepts-and-principle/sidecar-injection-deep-dive.html
