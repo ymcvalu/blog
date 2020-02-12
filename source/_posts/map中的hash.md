@@ -10,13 +10,13 @@ tags:
 ```go
 type Key struct {
 	a     int
-	Iface interface{}
+	eface interface{}
 }
 
 func main() {
 	m := map[Key]bool{}
-	m[Key{a: 10, Iface: 10}] = true // 运行通过
-	m[Key{a: 10, Iface: map[string]interface{}{}}] = true // panic
+	m[Key{a: 10, eface: 10}] = true // 运行通过
+	m[Key{a: 10, eface: map[string]interface{}{}}] = true // panic
 }
 ```
 
@@ -30,22 +30,23 @@ panic: runtime error: hash of unhashable type map[string]interface {}
 
 ### 具体实现
 
-接下来，我们来看一下其背后的实现逻辑。
+接下来，我们来看一下go是如何给map的key计算hash值的。
 
 首先，我们先看一下map中关于hash的计算逻辑：
 
 ```go
-alg := t.key.alg // 这里的key是maptype
+alg := t.key.alg // 这里的t是maptype
 hash := alg.hash(key, uintptr(h.hash0)) 
 ```
 
 接下来看一下`maptype`的结构定义：
 
 ```go
+// maptype表示一个map的类型
 type maptype struct {
 	typ        _type
-	key        *_type
-	elem       *_type
+	key        *_type // key的类型
+	elem       *_type // val的类型
 	bucket     *_type // internal type representing a hash bucket
 	keysize    uint8  // size of key slot
 	valuesize  uint8  // size of value slot
@@ -79,11 +80,16 @@ type typeAlg struct {
 	equal func(unsafe.Pointer, unsafe.Pointer) bool
 }
 ```
+go中所有的类型对应的**元类型**声明都是：
+```go
+type xxxtype struct {
+	typ  _type
+	...
+}
+```
+而`_type`中的`alg`字段，声明了用于计算该类型的hash函数和用于比较的比较函数。
 
-实际上，每个类型都会包含`_type`，而`_type`中的`alg`字段则定义了该类型对象的`hash`和`equal`方法
-
-而在`runtime`包中，已经声明了一些基本的`alg`：
-
+而在`runtime/alg.go`中，列出了一些预先定义的的`alg`：
 ```go
 var algarray = [alg_max]typeAlg{
 	alg_NOEQ:     {nil, nil}, // 表示没有hash方法和equal方法 
@@ -94,8 +100,8 @@ var algarray = [alg_max]typeAlg{
 	alg_MEM64:    {memhash64, memequal64},
 	alg_MEM128:   {memhash128, memequal128},
 	alg_STRING:   {strhash, strequal},
-	alg_INTER:    {interhash, interequal}, // 用于计算iface类型
-	alg_NILINTER: {nilinterhash, nilinterequal}, // 用于计算eface类型
+	alg_INTER:    {interhash, interequal}, // iface的hash和equal
+	alg_NILINTER: {nilinterhash, nilinterequal}, // eface的hash和equal
 	alg_FLOAT32:  {f32hash, f32equal},
 	alg_FLOAT64:  {f64hash, f64equal},
 	alg_CPLX64:   {c64hash, c64equal},
@@ -103,8 +109,9 @@ var algarray = [alg_max]typeAlg{
 }
 ```
 
-我们就看其中的`nilinterhash`的实现：
+我们就其中几个例子来感受一下：
 
+计算eface的hash：
 ```go
 func nilinterhash(p unsafe.Pointer, h uintptr) uintptr {
 	a := (*eface)(p) // p实际上就是一个空接口指针
@@ -112,22 +119,69 @@ func nilinterhash(p unsafe.Pointer, h uintptr) uintptr {
 	if t == nil { 
 		return h
 	}
+	// 使用实际类型的hash方法来计算
 	fn := t.alg.hash 
-	if fn == nil { // 如果没有指定hash方法，表明该类型不支持计算hash
+	// 如果没有hash方法，表明该类型不支持计算hash，比如slice、map或者func
+	if fn == nil { 
         // 这里的panic不就跟上面例子中的panic一样嘛
 		panic(errorString("hash of unhashable type " + t.string()))
 	}
+
+	// isDirectIface如果返回true，表示这个接口存的实际是一个指针值
 	if isDirectIface(t) {
+		// v:= &struct{...}
+		// i:=(interface{})(v)
+		// 这时候是这种情况，使用指针v的值计算hash
 		return c1 * fn(unsafe.Pointer(&a.data), h^c0)
 	} else {
+		// v:= struct{...}
+		// i:=(interface{})(v)
+		// 这时候是这种情况，对结构体计算hash
 		return c1 * fn(a.data, h^c0)
 	}
+}
+```
+eface的equal：
+```go
+func nilinterequal(p, q unsafe.Pointer) bool {
+	x := *(*eface)(p)
+	y := *(*eface)(q)
+	// 首先比较他们的类型是否一致
+	return x._type == y._type && efaceeq(x._type, x.data, y.data)
+}
+
+func efaceeq(t *_type, x, y unsafe.Pointer) bool {
+	if t == nil {
+		return true
+	}
+	// 然后调用实际类型的equal方法
+	eq := t.alg.equal
+	if eq == nil {
+		panic(errorString("comparing uncomparable type " + t.string()))
+	}
+	
+	if isDirectIface(t) {
+		// Direct interface types are ptr, chan, map, func, and single-element structs/arrays thereof.
+		// Maps and funcs are not comparable, so they can't reach here.
+		// Ptrs, chans, and single-element items can be compared directly using ==.
+		// 我们代码中得到的chan实际上就是一个ptr，chan的比较实际上就是比较地址
+		return x == y
+	}
+	return eq(x, y)
+}
+```
+字符串的hash
+```go
+func strhash(a unsafe.Pointer, h uintptr) uintptr {
+	x := (*stringStruct)(a)
+	// str指向底层字节数组，使用底层字节数组的内容计算hash
+	return memhash(x.str, h, uintptr(x.len))
 }
 ```
 
 接下来，我们看一下文章开头例子反编译后的汇编代码，我们主要是要看一下`Key`类型的`hash`方法
 
-首先，看一下`Key`类型的`type`：
+首先，看一下`Key`的类型元信息：
 
 ```go
 type."".Key SRODATA size=144
@@ -163,29 +217,37 @@ type..hashfunc."".Key SRODATA dupok size=8
 	rel 0+8 t=1 type..hash."".Key+0
 ```
 
-接着来看一下汇编生成的`type..hash."".Key`方法，只保留主要逻辑
+接着来看一下汇编生成的`type..hash."".Key`方法，这里只保留主要逻辑
 
+我们首先回顾一下该struct的声明：
+```go
+type Key struct {
+	a     int
+	eface interface{}
+}
+```
+对应hash方法的代码：
 ```assembly
 // 首先该函数有两个参数p和h，p表示要hash的对象指针，h表示hash seek，返回一个hash值
 TEXT	type..hash."".Key(SB), DUPOK|ABIInternal, $40-24
-	MOVQ	"".p+48(SP), AX // 将要hash的镀锡指针mov到ax
-	MOVQ	AX, (SP) // memhash第一个参数
+	MOVQ	"".p+48(SP), AX // 调用hash时传入的指针p，*Key类型
+	MOVQ	AX, (SP) // memhash第一个参数，实际上是 Key.a 的地址
 	MOVQ	"".h+56(SP), CX
-	MOVQ	CX, 8(SP) // memhash第二个参数
-	MOVQ	$8, 16(SP) // memhash第三个参数，这里8表示只对前8个字节进行hash计算
+	MOVQ	CX, 8(SP) // memhash第二个参数，调用hash时传入的seed
+	MOVQ	$8, 16(SP) // memhash第三个参数，因为字段a是int类型，在64位平台上占用8个字节
 	CALL	runtime.memhash(SB) // 调用memhash计算hash值
 	MOVQ	24(SP), AX // 将返回值保存到ax中
 	MOVQ	"".p+48(SP), CX
-	ADDQ	$8, CX // 这里指针计算，p+8对应的就是Key.Iface
+	ADDQ	$8, CX // 这里指针计算，p+8对应的就是Key.eface
 	MOVQ	CX, (SP) // nilinterhash第一个参数
-	MOVQ	AX, 8(SP) // 将memhash的第一个参数作为nilinterhash第二个参数
+	MOVQ	AX, 8(SP) // 将前面对 a 计算的hash作为seed传入
 	CALL	runtime.nilinterhash(SB) // 调用nilinterhash
 	MOVQ	16(SP), AX // 返回值mov到ax
 	MOVQ	AX, "".~r2+64(SP) // 设置返回值
 	RET
 ```
 
-直接看上面的逻辑，当计算`Key`的`hash`时，会先计算前8个字节的hash值，然后在调用`nilinterhash`来计算`Iface`的hash值。
+直接看上面的逻辑，当计算`Key`的`hash`时，首先对`key.a`进行hash，然后将结果作为`nilinterhash`的第二个参数`seed`，计算`eface`的hash值，得到最终的hash值。
 
 那么开头我们的例子中，运行的结果是`panic`，因此说明在`nilinterhash`中，因此对应的type没有hash方法而导致panic，为了验证我们的结论，我们看下`map[string]interface{}{}`对应的`_type`中的`alg`
 

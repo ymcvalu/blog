@@ -638,6 +638,7 @@ body {
 }
 .post-content p img {
   width: auto;
+  max-width: 600px;
 }
 .post-content ul,
 .post-content ol {

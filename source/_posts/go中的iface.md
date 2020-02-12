@@ -50,7 +50,7 @@ type _type struct {
 	// gcdata stores the GC type data for the garbage collector.
 	// If the KindGCProg bit is set in kind, gcdata is a GC program.
 	// Otherwise it is a ptrmask bitmap. See mbitmap.go for details.
-	gcdata    *byte
+	gcdata    *byte // 存储gc相关的信息
 	str       nameOff   // offset of name
 	ptrToThis typeOff   
 }
@@ -283,6 +283,16 @@ func main() {
  MOVQ	CX, "".pi+88(SP)                // 设置pi的 _type
  MOVQ	AX, "".pi+96(SP)                //  设置pi的data，这里data就是n的地址
 ```
+
+实际上在`_type.kind`中，会有个`flag`用于记录，该接口的`data`这个指针，是直接指向实际数据，还是指向一个拷贝：
+```go
+// Direct interface types are ptr, chan, map, func, and single-element structs/arrays thereof.
+func isDirectIface(t *_type) bool {
+	// 	kindDirectIface = 1 << 5
+	return t.kind&kindDirectIface != 0
+}
+```
+当`isisDirectIface`返回true，表示直接指向数据。
 
 ### 接口类型转换
 
