@@ -249,7 +249,7 @@ func mapaccessK(t *maptype, h *hmap, key unsafe.Pointer) (unsafe.Pointer, unsafe
 // NOTE: The returned pointer may keep the whole map live, so don't
 // hold onto it for very long.
 func mapaccess1(t *maptype, h *hmap, key unsafe.Pointer) unsafe.Pointer {
-    // 如果没有内容，则返回对应类型的零值
+    // 如果我们访问的map是nil或者map中没有存储内容，直接返回零值
 	if h == nil || h.count == 0 {
 		return unsafe.Pointer(&zeroVal[0])
 	}
