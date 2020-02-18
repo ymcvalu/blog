@@ -335,9 +335,10 @@ _ = io.ReaderCloser(rc) // no
 类型断言时，可能需要在运行时动态生成itab
 
 ```go
-// 接口断言
+// 接口断言，断言失败直接panic
 func assertI2I(inter *interfacetype, i iface) (r iface) {
    tab := i.tab
+   // 如果tab为nil，说明接口是nil，直接panic
    if tab == nil {
       // explicit conversions require non-nil interface value.
       panic(&TypeAssertionError{nil, nil, &inter.typ, ""})
@@ -354,8 +355,10 @@ func assertI2I(inter *interfacetype, i iface) (r iface) {
    return
 }
 
+// 接口断言，第二个返回值表示是否断言成功
 func assertI2I2(inter *interfacetype, i iface) (r iface, b bool) {
 	tab := i.tab
+	// 接口是nil，返回断言失败
 	if tab == nil {
 		return
 	}
