@@ -88,9 +88,11 @@ func (fd *netFD) dup() (f *os.File, err error) {
 }
 
 func (fd *FD) Dup() (int, string, error) {
+	// 这里首先要引用计数加一，防止在执行dup的时候文件被close掉
 	if err := fd.incref(); err != nil {
 		return -1, "", err
 	}
+	// 在执行完dup之后，引用计数减一，引用计数减到0之后，会自动调用close方法
 	defer fd.decref()
 	return DupCloseOnExec(fd.Sysfd) 
 }
