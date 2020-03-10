@@ -151,4 +151,4 @@ impl<T> Clone for FatPtr<T> {
 }
 ```
 
-至此，我们已经实现了一个`&mut [T]`的`split`方法，我们可以使用该方法来split任意类型的slice。
+至此，我们已经实现了一个`&mut [T]`的`split`方法了。
