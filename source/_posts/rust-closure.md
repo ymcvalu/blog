@@ -4,11 +4,59 @@ date: 2020-03-09 22:32:06
 tags:
     - rust
 ---
-# closure
 
-`rust`的闭包，实际上是语法糖，它本质上是一个实现了特定`trait`的匿名的`struct`。
+先来看一下闭包的语法：
+
+```rust
+fn main() {
+    // 参数在`||`里面
+    let l1 = |x| x + 1; // 如果只有一个表达式，可以省略`{}`
+    let l2 = |x, y| x + y;
+    let l3 = || 1;
+    let l4 = |x: i32, y: i32| x + y;
+    let l5 = |x, y| -> i32 { x + y };
+    let l6 = |x: i32, y: i32| -> i32 { x + y }; // 如果显示指定了返回值，需要`{}`
+    let l7 = |x: i32, y: i32| {
+        println!("{}+{}", x, y);
+        x + y
+    };
+
+    println!("{}", l1(1));
+    println!("{}", l2(1, 2));
+    println!("{}", l3());
+    println!("{}", l4(1, 2));
+    println!("{}", l5(1, 2));
+    println!("{}", l6(1, 2));
+    println!("{}", l7(1, 2));
+}
+```
+
+闭包和函数一样，可以有参数和返回值，对于参数和返回值的类型，可以由编译器根据上下文自动推导，我们也可以显示指定。
+
+闭包捕获外部变量时，默认是获取外部变量的引用，如果在闭包内对变量进行更新，那么就会获取mutable reference，这也要求外部变量要是`mutable`；而如果只是进行读取，则会获取immutable reference。
 
 
+
+除了`borrow`外部变量的`reference`，有时候我们需要`closure`获得外部变量的`ownership`，比如我们的`closure`需要传到子线程执行，这时候它的`lifetime`需要是`'static`的，我们可以使用`move`关键字，来表明我们需要让`closure`获取所有它捕获的所有外部变量的`ownership`：
+
+```rust
+let a = String::from("hello, closure");
+let l = move || println!("{}", a); // 变量a会move到闭包内
+```
+
+**当我们在声明`closure`的时候，指定了`move`关键字，那么它捕获的所有外部变量都会`move`到匿名结构体中。**
+
+
+
+目前，还不支持声明泛型`closure`，如果需要泛型还是使用函数，或者使用泛型函数返回一个闭包。
+
+
+
+`rust`的闭包，实际上是语法糖，它本质上是一个实现了特定`trait`的匿名的`struct`，与闭包相关的`trait`有这三个：
+
+- `Fn`
+- `FnMut`
+- `FnOnce`
 
 ### Fn trait
 
@@ -50,11 +98,32 @@ where
 
 ```
 
-实际上，没有捕获外部变量或者只捕获了`immutable reference`的`closure`，会被编译成实现了`Fn`这个`trait`的匿名的`struct`。
+实际上，没有捕获外部变量或者只捕获了`immutable reference`的`closure`，会被编译成实现了`Fn`这个`trait`的匿名的`struct`，~~我们**可以通过实现这个`trait`来重载`call`这个运算符**~~，当前还不支持重载`call`运算符。
 
 并且这个`struct`还会实现`Copy`这个`trait`，因为这个匿名`struct`里面只有`ref`，是可以`copy`的，因此这个`closure`可以多次传输。
 
 **闭包本质上就是一个重载了`call`运算符的匿名结构体，不同的闭包，其结构体是不一样的，因此是DST，因此当需要使用闭包作为参数时，需要使用泛型或者trait object，当需要返回闭包时，可以使用`impl Fn(T) -> U`或者使用 trait object，比如 Box<dyn Fn(T)->U>**
+
+
+
+当我们使用`move`将闭包捕获的外部变量`move`到闭包内，并且不进行修改时，会实现`Fn`但是不会实现`Copy`：
+
+```rust
+fn main() {
+    let mut s=String::from("x");
+    let l=move ||println!("{}",s ); // 如果capture外部变量的ownership，并且没有mutate，那么实现Fn这个trait，但是没有实现Copy这个trait
+    l();
+    call_lambda(l); 
+    // l(); // l 已经move了，无法使用了
+ }
+
+ fn call_lambda<T>(t:T)
+ where T:Fn(){
+    t();
+ }
+```
+
+这时候，匿名结构体拥有被捕获变量的`ownership`，因此无法实现`Copy`这个`trait`。
 
 
 
@@ -119,12 +188,13 @@ fn main() {
 
 
 
-除了`borrow`外部变量的`reference`，有时候我们需要`closure`获得外部变量的`ownership`，比如我们的`closure`需要传到子线程执行，这时候它的`lifetime`需要是`'static`的，我们可以使用`move`关键字，来表明我们需要让`closure`获取所有它捕获的所有外部变量的`ownership`：
+同样可以使用`move`将变量的`ownership`转移到闭包内：
 
 ```rust
 fn main() {
     let mut hello = String::from("hello, closure!");
     let mut l = move || {
+        // 如果外面hello声明不是mut的，那么在closure内我们无法对其进行修改
         hello.push_str("!");
         println!("{}", hello);
     };
@@ -142,8 +212,6 @@ where
 }
 ```
 
-**当我们在声明`closure`的时候，指定了`move`关键字，那么它捕获的所有外部变量都会`move`到匿名结构体中。**
-
 对于获取了外部变量的`ownership`，但是没有`consume`外部变量的`closure`，也同样实现`FnMut`这个`trait`，就像上面的例子中的一样。
 
 
@@ -156,6 +224,7 @@ where
 fn main() {
     let mut hello = String::from("hello, closure!");
     let l = move || { // hello被move到closure内
+        // 如果外面hello声明不是mut的，那么在closure内我们无法对其进行修改
         hello.push_str("!");
         println!("{}", hello);
         drop(hello); // 这里消费了hello
@@ -180,7 +249,7 @@ pub trait FnOnce<Args> {
 
 **`FnOnce` is implemented automatically by closure that might consume captured variables**, as well as all types that implement [`FnMut`](https://doc.rust-lang.org/core/ops/trait.FnMut.html), e.g., (safe) [function pointers](https://doc.rust-lang.org/std/primitive.fn.html) (since `FnOnce` is a supertrait of [`FnMut`](https://doc.rust-lang.org/core/ops/trait.FnMut.html)). 
 
-**这里的`consume`指的是，在执行过程中，把move到匿名结构体中的变量又`move`到别的地方去了**
+**这里的`consume`指的是，在执行过程中，把获得了其ownership，已经move到匿名结构体中的变量又`move`到别的地方去了**，即便后面又`move`回去了，编译器也会认为我们`consume`这个变量。
 
 这个时候，原来的变量已经被`move`掉了，如果允许再次被执行，就和所有权系统相违背了。
 
@@ -221,15 +290,30 @@ fn capture<T>(t: T) -> T { // 该方法会让编译器分析需要获取ownershi
 
 在上面的例子中，编译器会自动分析，需要捕获外部变量的`ownership`，因此`hello`被`move`到闭包内了，但是`s`只是获取了它的引用。
 
-但是，这个闭包只实现了`FnOnce`，因为消费了`hello`，即使我们又把`hello`给move回去了，编译器还是认为它被消费了，不知道这是不是一个bug???
+但是，这个闭包只实现了`FnOnce`，因为消费了`hello`：
+
+```rust
+57 |     l();
+   |     - value moved here
+58 |     l();
+   |     ^ value used here after move
+   |
+note: closure cannot be invoked more than once because it moves the variable `hello` out of its environment
+  --> src/main.rs:52:25
+   |
+52 |         hello = capture(hello);
+   |                         ^^^^^
+```
+
+**即使我们又把`hello`给`move`回去了，编译器还是认为我们消费了该变量**
 
 
 
-### closure基本使用
 
-首先来看一个比较容易迷惑人的细节：
 
-首先，我们的代码如下：
+### closure创建的时候就捕获了变量
+
+我们来看下面的代码：
 
 ```rust
 fn main() {
@@ -240,7 +324,7 @@ fn main() {
 }
 ```
 
-但是运行的时候，编译器会报错：
+运行的时候，编译器会报错：
 
 ```rust
     let mut l = || hello.push_str("!");
@@ -261,33 +345,7 @@ fn main() {
 
 
 
-闭包和函数一样，可以有参数和返回值，对于参数和返回值的类型，可以由编译器根据上下文自动推导，我们也可以显示指定：
 
-```rust
-fn main() {
-    // 参数在`||`里面
-    let l1 = |x| x + 1; // 如果只有一个表达式，可以省略`{}`
-    let l2 = |x, y| x + y;
-    let l3 = || 1;
-    let l4 = |x: i32, y: i32| x + y;
-    let l5 = |x, y| -> i32 { x + y };
-    let l6 = |x: i32, y: i32| -> i32 { x + y }; // 如果显示指定了返回值，需要`{}`
-    let l7 = |x: i32, y: i32| {
-        println!("{}+{}", x, y);
-        x + y
-    };
-
-    println!("{}", l1(1));
-    println!("{}", l2(1, 2));
-    println!("{}", l3());
-    println!("{}", l4(1, 2));
-    println!("{}", l5(1, 2));
-    println!("{}", l6(1, 2));
-    println!("{}", l7(1, 2));
-}
-```
-
-目前，还不支持声明泛型`closure`，如果需要泛型还是使用函数，或者使用泛型函数返回一个闭包。
 
 
 
