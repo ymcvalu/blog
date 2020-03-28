@@ -1100,7 +1100,7 @@ static __poll_t ep_send_events_proc(struct eventpoll *ep, struct list_head *head
 		uevent++;
 		// 如果设置了EPLLONESHOT
 		if (epi->event.events & EPOLLONESHOT) 
-			// 将events mask设置为EP_PRIVATE_BITS，不再接受其他事件，但是并没有从epoll中删除
+			// 将events mask设置为EP_PRIVATE_BITS，不会再触发通知，但是并没有从epoll中删除
 			epi->event.events &= EP_PRIVATE_BITS; 
 		else if (!(epi->event.events & EPOLLET)) { 
 			// 如果是水平触发模式
@@ -1226,6 +1226,19 @@ out_unlock:
 
 
 ##### 惊群效应
-当同一个file被同时添加到多个`epoll`中，并且监听了相同的事件。当对应事件就绪时，所有等待的任务都会被唤醒，但是最终却只有一个任务得到执行，可以在添加文件时设置`EPOLLEXCLUSIVE`，这样就只会唤醒一个阻塞队列不为空的`epoll`。
+ In [computer science](https://en.wikipedia.org/wiki/Computer_science), the **thundering herd problem** occurs **when a large number of processes or threads waiting for an event are awoken when that event occurs, but only one process is able to handle the event**. After all the processes wake up, they will start to handle the event, but only one will win. All processes will compete for resources, possibly freezing the computer, until the herd is calmed down again. 
 
-当多个任务同时等待在同一个`epoll`实例上时，当事件就绪时，所有任务都会被唤醒，这种情况可以通过设置边缘触发模型来规避。
+###### 多个进程/线程等待同一个epoll实例
+如果多个进程或者线程通过`epoll_wait`阻塞在同一个`epoll`上，从上面的代码我们知道，**当使用水平触发模式的时候，就绪的fd会被重新加入到就绪队列中**，从而导致多个线程/进程被同一个就绪fd唤醒。我们可以使用边缘触发模式，或者设置`EPOLLONESHOT`来规避该问题。
+
+###### 同一个fd被加入到多个epoll实例
+当一个file被同时添加到多个`epoll`中，并且监听了相同的事件。当该file对应事件就绪时，默认该file会被添加到每个epoll的就绪队列中。
+可以在添加file到每个epoll的时候，设置`EPOLLEXCLUSIVE`这个flag来解决该问题：
+> Sets an exclusive wakeup mode for the epoll file descriptor that is being attached to the target file descriptor, fd. When a wakeup event occurs and multiple epoll file descriptors are attached to the same target file using EPOLLEXCLUSIVE, one or more of the epoll file descriptors will receive an event with epoll_wait(2).  The default in this scenario (when EPOLLEXCLUSIVE is not set) is for all epoll file descriptors to receive an event.  EPOLLEXCLUSIVE is thus useful for avoiding thundering herd problems in certain scenarios.
+> If the same file descriptor is in multiple epoll instances, some with the EPOLLEXCLUSIVE flag, and others without, then events will be provided to all epoll instances that did not specify EPOLLEXCLUSIVE, and at least one of the epoll instances that did specify EPOLLEXCLUSIVE.
+
+注意：
+- `EPOLLEXCLUSIVE`只能在`EPOLL_CTL_ADD`操作中设置
+- 无法有效的和`EPOLLONESHOT`共用，因为在`ep_send_events_proc`中，如果设置了`EPOLLONESHOT`，EPOLLEXCLUSIVE这个flag会被清除，但是该flag又不能在`EPOLL_CTL_MOD`调用时设置
+
+
