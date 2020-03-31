@@ -69,7 +69,7 @@ func coin(n int, coins []int) (int, map[int]int) {
 	for i := 1; i <= n; i++ {
 		for j := 0; j < len(coins) && coins[j] <= i; j++ {
 			if dp[i] == 0 {
-				dp[i] = dp[i-1] + 1
+				dp[i] = dp[i-coins[j]] + 1
 			} else {
 				dp[i] = min(dp[i], dp[i-coins[j]]+1)
 			}
