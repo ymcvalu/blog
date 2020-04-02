@@ -36,11 +36,9 @@ func main() {
 ```
 可以看到，`S.E`的offset是32，并且size确实是0，但是S实例的size却是40。说明S.E后面还有一个隐藏的8byte的padding。
 
-首先，因为S是8byte对齐的，因此原来32byte，padding只能是8byte。
+为什么需要这个padding呢？
 
-那为什么需要这个padding呢？
-
-带着疑问，我在github上面提了个[issue](https://github.com/golang/go/issues/38194)，很快就得到了大神的回复：
+带着疑问，我在github上面提了个[issue](https://github.com/golang/go/issues/38194)，很快就得到了社区大佬的回复：
 > **Trailing zero-sized struct fields are padded because if they weren't, &C.E would point to an invalid memory location.**
 
 并且还给了个相关的[issue](https://github.com/golang/go/issues/9401)地址：
@@ -65,6 +63,18 @@ type SS struct {
 }
 ```
 上面的`SS`本身末尾已经有4byte的padding了，其size就是32byte。
+
+而因为`S`是8byte对齐的，因此最后的padding也就只能是8byte了，因此最后总的内存占用就是40byte了。
+
+那为什么8byte对齐，其padding就要是8byte呢？这个问题可以归纳为，如果一个struct是n byte对齐，那么其最终大小需要是n的倍数。
+
+因为，假如我们现在有一个struct的数组，那么在内存上，这些struct是相连存放的：
+```
+|arr[0]|arr[1]|...
+```
+因为arr[0]需要内存对齐，arr[1]也需要内存对齐，这就要求n byte对齐的struct，其内存占用就要是n的倍数。
+
+
 
 
 继续上面的S结构体，我们再来看一下另一个迷惑行为：
