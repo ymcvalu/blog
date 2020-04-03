@@ -328,58 +328,37 @@ func max(i,j int)int{
 }
 ```
 ### 0-1背包问题
-最后，以一个01背包问题来收尾，01背包问题算是dp的入门题目了，只找到以前写的java实现：
-```java
-import java.util.Scanner;
+最后，以一个01背包问题来收尾，01背包问题算是dp的入门题目了。假如现在有容量为capacity的背包，weights数组为物品的重量，values为物品的价值，现在要求每个物品最多只能装一次，求背包能够装的最大价值。
 
-/**
- * Created by ymcvalu on 2017/4/19.
- */
-public class Bag_0_1 {
-    public static void main(String[]args){
-        Scanner scanner = new Scanner(System.in);
-        int ceilingWeight = scanner.nextInt();
-        int n = scanner.nextInt();
-        int[] weight = new int[n+1];
-        int[] value = new int[n+1];
-        for (int i=1; i<value.length; i++) {
-            weight[i] = scanner.nextInt();
-            value[i] = scanner.nextInt();
+可以使用`dp[i][j]`表示只考虑前i个物品的时候，容量j可以装的最大价值，那么可以得到状态转移方程：
+```
+dp[i][j]=max(dp[i-1][j], dp[i-1][j-weight[i]]+values[i]) 
+- dp[i-1][j]：表示不装入当前物品
+- dp[i-1][j-weight[i]]+values[i]表示装入当前物品
+```
+具体的代码实现就是：
+```go
+func one_zero_bag(capacity int, weights []int, values []int) int {
+    wn := len(weights)
+    dp := make([][]int, wn+1)
+    for i := 0; i < wn+1; i++ {
+        dp[i] = make([]int, capacity+1)
+    }
+
+    for i := 1; i <= wn; i++ {
+        for j := weights[i-1]; j <= capacity; j++ {
+            dp[i][j] = max(dp[i-1][j], dp[i-1][j-weights[i-1]]+values[i-1])
         }
-        int[][] matrix = new int[n+1][ceilingWeight+1];
-        bag_0_1(matrix,weight,value,ceilingWeight);
-        System.out.println(matrix[n][ceilingWeight]);
     }
 
-    public static void bag_0_1(int[][]matrix,int[]weight,int[]value,int ceilingWeight){
-         for(int i=0;i<matrix.length;i++)
-             matrix[i][0]=0;
+    return dp[wn][capacity]
+}
 
-         for(int i=0;i<matrix[0].length;i++)
-             matrix[0][i]=0;
-
-         int ceiling=Math.min(weight[1],ceilingWeight);
-         
-		 for(int i=1;i<ceiling;i++)
-             matrix[1][i]=0;
-         
-		 for(int i=weight[1];i<=ceilingWeight;i++)
-             matrix[1][i]=value[1];
-         
-		 for(int i=2;i<matrix.length;i++){
-             ceiling=Math.min(weight[i],ceilingWeight);
-
-             for(int j=1;j<ceiling;j++)
-                 matrix[i][j]=matrix[i-1][j];
-
-             for(int j=weight[i];j<=ceilingWeight;j++){
-                 if(matrix[i-1][j]>matrix[i-1][j-weight[i]]+value[i])
-                     matrix[i][j]=matrix[i-1][j];
-                 else
-                     matrix[i][j]=matrix[i-1][j-weight[i]]+value[i];
-             }
-         }
+func max(i, j int) int {
+    if i > j {
+        return i
     }
+    return j
 }
 ```
 
