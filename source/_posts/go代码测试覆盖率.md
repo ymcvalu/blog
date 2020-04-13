@@ -2,7 +2,8 @@
 title: go代码测试覆盖率
 date: 2020-04-13 23:38:37
 tags:
-    - go - test cover
+    - go
+    - test cover
 ---
 go 工具链自带代码测试覆盖率：
 ```sh

@@ -2,7 +2,8 @@
 title: sync.map
 date: 2020-04-13 23:07:53
 tags:
-    - go    - sync
+    - go    
+    - sync
 ---
 go的`map`并不是并发安全的，因此在需要并发访问时，需要额外加锁，或者使用`sync.Map`。
 > 应该尽量使用原生的map+锁，因为有编译时的类型安全检查
