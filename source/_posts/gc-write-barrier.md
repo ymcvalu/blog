@@ -6,7 +6,7 @@ tags:
     - gc
 ---
 go的gc实现是三色标记+并发扫描，gc协程和用户的工作协程并发运行。
-![三色标记](img/../../img/tricolor-marking.gif)
+![三色标记](/img/tricolor-marking.gif)
 
 在gc开始阶段，会先执行`STW`，在`STW`中会开启写屏障。最开始go使用的是Dijkstra写屏障。
 
