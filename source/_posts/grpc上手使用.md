@@ -284,14 +284,13 @@ func main() {
 
 可见`grpc`本身单条连接可用提供的并发效果足以满足大部分业务场景。
 
-**注意：**上面的`1000`个并发请求并不是单条连接可以同时发起`1000`个请求，而是其内部支持类似`pipeline`的机制。
+`http2`提供了多路复用，即每个连接可以同时创建多个`stream`，而数据分`frame`进行传输，每个`frame`都有`streamID`来标识属于哪个`stream`。由于`grpc`采用`http2`协议，因此单连接就可以并发发起多个rpc请求。但是，对于同一条连接的所有stream，最终是需要竞争socket的写锁的，因此当并发请求比较高的时候，可以适当添加连接数，来减少锁的竞争。默认grpc是一个后端地址创建一条连接，但是我们可以自己实现`Resolver`接口，每个后端地址生成多个`Address`，`grpc`实际上是根据`Address`来创建连接的，每个`Address`创建一条连接。
 
 ##### 连接池
 
 接下来不使用`http2`的多路复用，采用连接池的方式来创建请求
 
-首先实现一个连接池：
-
+首先实现一个简单的连接池：
 ```go
 package main
 
@@ -405,17 +404,19 @@ func (p *Pool) Put(conn *grpc.ClientConn) error {
 	}
 	p.Lock()
 	defer p.Unlock()
-    // 放回空闲连接
-	if len(p.freeConn) < p.maxIdle {
-		p.freeConn = append(p.freeConn, conn)
-		return nil
-	}
+
     // 再次判断是否有等待可用连接
 	select {
 	case p.connCh <- conn:
 		return nil
 	default:
-        // 关闭连接
+    	// 放回空闲连接
+		if len(p.freeConn) < p.maxIdle {
+			p.freeConn = append(p.freeConn, conn)
+			return nil
+		}
+
+        // 空闲连接数达到上限，关闭连接
 		p.curConnNum--
 		return conn.Close()
 	}
